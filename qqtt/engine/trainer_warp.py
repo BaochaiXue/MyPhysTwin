@@ -953,8 +953,12 @@ class InvPhyTrainerWarp:
         assert (
             len(spring_Y) == self.simulator.n_springs
         ), "Check if the loaded checkpoint match the config file to connect the springs"
-
-        self.simulator.set_spring_Y(torch.log(spring_Y).detach().clone())
+        # Scale the spring_Y to a reasonable range
+        scale_factor = 1.0
+        self.simulator.set_spring_Y(
+            torch.log(spring_Y * scale_factor).detach().clone()
+        )  # we try to modify the spring_Y here
+        print("Spring Y:", spring_Y)
         self.simulator.set_collide(
             collide_elas.detach().clone(), collide_fric.detach().clone()
         )

@@ -1,4 +1,8 @@
 # The first stage to optimize the sparse parameters using CMA-ES
+"""Run CMA-ES optimization for scene parameters."""
+
+from __future__ import annotations
+
 from qqtt import OptimizerCMA
 from qqtt.utils import logger, cfg
 from qqtt.utils.logger import StreamToLogger, logging
@@ -11,7 +15,8 @@ import json
 from argparse import ArgumentParser
 
 
-def set_all_seeds(seed):
+def set_all_seeds(seed: int) -> None:
+    """Seed RNGs for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -21,7 +26,7 @@ def set_all_seeds(seed):
     torch.backends.cudnn.benchmark = False
 
 
-seed = 42
+seed: int = 42
 set_all_seeds(seed)
 
 sys.stdout = StreamToLogger(logger, logging.INFO)
@@ -40,6 +45,7 @@ if __name__ == "__main__":
     train_frame = args.train_frame
     max_iter = args.max_iter
 
+    # Choose configuration depending on the scene type
     if "cloth" in case_name or "package" in case_name:
         cfg.load_from_yaml("configs/cloth.yaml")
     else:
@@ -48,6 +54,7 @@ if __name__ == "__main__":
     base_dir = f"experiments_optimization/{case_name}"
 
     # Set the intrinsic and extrinsic parameters for visualization
+    # Camera extrinsics used for rendering
     with open(f"{base_path}/{case_name}/calibrate.pkl", "rb") as f:
         c2ws = pickle.load(f)
     w2cs = [np.linalg.inv(c2w) for c2w in c2ws]
@@ -60,6 +67,7 @@ if __name__ == "__main__":
     cfg.overlay_path = f"{base_path}/{case_name}/color"
 
     logger.set_log_file(path=base_dir, name="optimize_cma_log")
+    # Instantiate the CMA optimizer
     optimizer = OptimizerCMA(
         data_path=f"{base_path}/{case_name}/final_data.pkl",
         base_dir=base_dir,

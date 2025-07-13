@@ -1,10 +1,15 @@
+"""Configuration class used across training and inference."""
+
+from __future__ import annotations
+
 from .misc import singleton
 import yaml
+import pickle
 
 
 @singleton
 class Config:
-    def __init__(self):
+    def __init__(self) -> None:
         self.data_type = "real"
         self.FPS = 30
         self.dt = 5e-5
@@ -50,7 +55,7 @@ class Config:
         # Other parameters for visualization
         self.overlay_path = None
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         # Convert the class to dictionary
         return {
             attr: getattr(self, attr)
@@ -58,7 +63,7 @@ class Config:
             if not callable(getattr(self, attr)) and not attr.startswith("__")
         }
 
-    def update_from_dict(self, config_dict):
+    def update_from_dict(self, config_dict: dict) -> None:
         for key, value in config_dict.items():
             if hasattr(self, key):
                 current_value = getattr(self, key)
@@ -68,14 +73,31 @@ class Config:
                     value = float(value)
                 setattr(self, key, value)
 
-    def load_from_yaml(self, file_path):
+    def load_from_yaml(self, file_path: str) -> None:
         with open(file_path, "r") as file:
             config_dict = yaml.safe_load(file)
         self.update_from_dict(config_dict)
 
-    def set_optimal_params(self, optimal_params):
+    def set_optimal_params(self, optimal_params: dict) -> None:
         optimal_params["init_spring_Y"] = optimal_params.pop("global_spring_Y")
         self.update_from_dict(optimal_params)
+
+    # ------------------------------------------------------------------
+    # Convenience loaders used in tests and training scripts
+    # ------------------------------------------------------------------
+
+    def load_zero_order_params(self, yaml_path: str) -> None:
+        """Load parameters from ``yaml_path`` only."""
+
+        self.load_from_yaml(yaml_path)
+
+    def load_first_order_params(self, yaml_path: str, opt_pkl: str) -> None:
+        """Load YAML configuration and override with values from a pickle."""
+
+        self.load_from_yaml(yaml_path)
+        with open(opt_pkl, "rb") as f:
+            params = pickle.load(f)
+        self.set_optimal_params(params)
 
 
 cfg = Config()

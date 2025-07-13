@@ -1,22 +1,37 @@
+"""Utility script to export gaussian point cloud and related metadata."""
+
+from __future__ import annotations
+
 import os
 import csv
 import json
 import pickle
+from typing import Dict, List
+
 import numpy as np
 import open3d as o3d
 
-base_path = "./data/different_types"
-output_path = "./data/gaussian_data"
-CONTROLLER_NAME = "hand"
+# Path containing the raw captured data for all scenes
+base_path: str = "./data/different_types"
+# Destination folder where the processed gaussian data will be stored
+output_path: str = "./data/gaussian_data"
+# Name of the controller object in the masks
+CONTROLLER_NAME: str = "hand"
 
 
-def existDir(dir_path):
+def existDir(dir_path: str) -> None:
+    """Create directory ``dir_path`` if it does not yet exist."""
+
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
 
+# Ensure the output directory exists
 existDir(output_path)
 
+# ``data_config.csv`` contains rows of scene name, object category and whether
+# a shape prior is provided.  Iterate over each entry and copy the relevant
+# assets to ``output_path`` for later use.
 with open("data_config.csv", newline="", encoding="utf-8") as csvfile:
     reader = csv.reader(csvfile)
     for row in reader:

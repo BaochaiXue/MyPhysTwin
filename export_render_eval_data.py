@@ -1,19 +1,28 @@
+"""Export a subset of the dataset for rendering and evaluation."""
+
+from __future__ import annotations
+
 import os
 import csv
 import json
 
-base_path = "./data/different_types"
-output_path = "./data/render_eval_data"
-CONTROLLER_NAME = "hand"
+base_path: str = "./data/different_types"
+output_path: str = "./data/render_eval_data"
+CONTROLLER_NAME: str = "hand"
 
 
-def existDir(dir_path):
+def existDir(dir_path: str) -> None:
+    """Create directory ``dir_path`` if needed."""
+
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
 
+# Ensure base output directory exists
 existDir(output_path)
 
+# Parse scene information from the configuration CSV and copy the corresponding
+# images and masks into ``output_path`` for easier visualization.
 with open("data_config.csv", newline="", encoding="utf-8") as csvfile:
     reader = csv.reader(csvfile)
     for row in reader:

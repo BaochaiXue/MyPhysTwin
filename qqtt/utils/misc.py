@@ -1,8 +1,14 @@
+"""Utility decorators and helpers used across the project."""
+
+from __future__ import annotations
+
 import functools
 from torch import distributed as dist
 
 
-def get_dist_info():
+def get_dist_info() -> tuple[int, int]:
+    """Return ``(rank, world_size)`` for the current distributed context."""
+
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
         world_size = dist.get_world_size()
@@ -13,7 +19,7 @@ def get_dist_info():
 
 
 def master_only(func):
-
+    
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         rank, _ = get_dist_info()

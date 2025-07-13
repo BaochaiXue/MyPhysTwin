@@ -1,3 +1,7 @@
+"""Simple colored logger used throughout the repository."""
+
+from __future__ import annotations
+
 import logging
 import os.path
 import time
@@ -90,7 +94,7 @@ class FileFormatter(Formatter):
 @singleton
 class ExpLogger(logging.Logger):
 
-    def __init__(self, name: Optional[str] = None):
+    def __init__(self, name: Optional[str] = None) -> None:
         if name is None:
             name = time.strftime("%Y_%m%d_%H%M_%S", time.localtime(time.time()))
         super().__init__(name)
@@ -100,18 +104,18 @@ class ExpLogger(logging.Logger):
         self.filehandler = None
 
     @master_only
-    def set_log_stream(self):
+    def set_log_stream(self) -> None:
         self.stearmhandler = logging.StreamHandler()
         self.stearmhandler.setFormatter(SteamFormatter())
         self.stearmhandler.setLevel(logging.DEBUG)
 
         self.addHandler(self.stearmhandler)
 
-    def remove_log_stream(self):
+    def remove_log_stream(self) -> None:
         self.removeHandler(self.stearmhandler)
 
     @master_only
-    def set_log_file(self, path: str, name: Optional[str] = None):
+    def set_log_file(self, path: str, name: Optional[str] = None) -> None:
         if not os.path.exists(path):
             os.makedirs(path)
         file_path = os.path.join(
@@ -123,37 +127,39 @@ class ExpLogger(logging.Logger):
         self.addHandler(self.filehandler)
 
     @master_only
-    def info(self, msg, **kwargs) -> None:
+    def info(self, msg: str, **kwargs) -> None:
         return super().info(msg, **kwargs)
 
     @master_only
-    def warning(self, msg, **kwargs) -> None:
+    def warning(self, msg: str, **kwargs) -> None:
         return super().warning(msg, **kwargs)
 
     @master_only
-    def error(self, msg, **kwargs) -> None:
+    def error(self, msg: str, **kwargs) -> None:
         return super().error(msg, **kwargs)
 
     @master_only
-    def debug(self, msg, **kwargs) -> None:
+    def debug(self, msg: str, **kwargs) -> None:
         return super().debug(msg, **kwargs)
 
     @master_only
-    def critical(self, msg, **kwargs) -> None:
+    def critical(self, msg: str, **kwargs) -> None:
         return super().critical(msg, **kwargs)
 
 
 logger = ExpLogger()
 
-class StreamToLogger():
-    def __init__(self, logger, log_level):
+class StreamToLogger:
+    """Redirect ``stdout``/``stderr`` streams to a :class:`logging.Logger`."""
+
+    def __init__(self, logger: logging.Logger, log_level: int) -> None:
         super().__init__()
         self.logger = logger
         self.log_level = log_level
 
-    def write(self, message):
+    def write(self, message: str) -> None:
         if message.strip():
             self.logger.log(self.log_level, message.strip())
 
-    def flush(self):
+    def flush(self) -> None:  # pragma: no cover - used by stream interface
         pass

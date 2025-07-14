@@ -9,31 +9,47 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import torch
-from gaussian_splatting.scene import Scene
+"""Utility for rendering static Gaussian splatting results."""
+
+from __future__ import annotations
+
+import copy
 import os
-from tqdm import tqdm
-from os import makedirs
-from gaussian_splatting.gaussian_renderer import render
-import torchvision
-from gaussian_splatting.utils.general_utils import safe_state
 from argparse import ArgumentParser
+from os import makedirs
+from tqdm import tqdm
+
+import numpy as np
+import pytorch3d
+import pytorch3d.ops as ops
+import torch
+import torchvision
+from kornia import create_meshgrid
+
 from gaussian_splatting.arguments import ModelParams, PipelineParams, get_combined_args
-from gaussian_splatting.gaussian_renderer import GaussianModel
+from gaussian_splatting.gaussian_renderer import GaussianModel, render
+from gaussian_splatting.scene import Scene
+from gaussian_splatting.utils.general_utils import safe_state
 try:
     from diff_gaussian_rasterization import SparseGaussianAdam
     SPARSE_ADAM_AVAILABLE = True
 except:
     SPARSE_ADAM_AVAILABLE = False
 
-import numpy as np
-from kornia import create_meshgrid
-import copy
-import pytorch3d
-import pytorch3d.ops as ops
 
-
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background, train_test_exp, separate_sh, disable_sh=False):
+def render_set(
+    model_path: str,
+    name: str,
+    iteration: int,
+    views,
+    gaussians: GaussianModel,
+    pipeline: PipelineParams,
+    background: torch.Tensor,
+    train_test_exp: bool,
+    separate_sh: bool,
+    disable_sh: bool = False,
+) -> None:
+    """Render a set of camera views and save images to disk."""
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
@@ -63,7 +79,16 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
 
 
-def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, separate_sh: bool, remove_gaussians: bool = False):
+def render_sets(
+    dataset: ModelParams,
+    iteration: int,
+    pipeline: PipelineParams,
+    skip_train: bool,
+    skip_test: bool,
+    separate_sh: bool,
+    remove_gaussians: bool = False,
+) -> None:
+    """Render all train and test views for a dataset."""
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
@@ -102,7 +127,16 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, dataset.train_test_exp, separate_sh, disable_sh=dataset.disable_sh)
 
 
-def get_ray_directions(H, W, K, device='cuda', random=False, return_uv=False, flatten=True, anti_aliasing_factor=1.0):
+def get_ray_directions(
+    H: int,
+    W: int,
+    K: torch.Tensor,
+    device: str = "cuda",
+    random: bool = False,
+    return_uv: bool = False,
+    flatten: bool = True,
+    anti_aliasing_factor: float = 1.0,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Get ray directions for all pixels in camera coordinate [right down front].
     Reference: https://www.scratchapixel.com/lessons/3d-basic-rendering/
@@ -143,7 +177,8 @@ def get_ray_directions(H, W, K, device='cuda', random=False, return_uv=False, fl
     return directions
 
 
-def remove_gaussians_with_mask(gaussians, views):
+def remove_gaussians_with_mask(gaussians: GaussianModel, views) -> GaussianModel:
+    """Filter gaussians that are not covered by alpha masks in the views."""
     gaussians_xyz = gaussians._xyz.detach()
     gaussians_view_counter = torch.zeros(gaussians_xyz.shape[0], dtype=torch.int32, device='cuda')
     with torch.no_grad():
@@ -193,7 +228,10 @@ def remove_gaussians_with_mask(gaussians, views):
     return new_gaussians
 
 
-def remove_gaussians_with_low_opacity(gaussians, opacity_threshold=0.1):
+def remove_gaussians_with_low_opacity(
+    gaussians: GaussianModel, opacity_threshold: float = 0.1
+) -> GaussianModel:
+    """Remove gaussians whose opacity is below ``opacity_threshold``."""
 
     opacity = gaussians.get_opacity.squeeze(-1)
     mask3d = opacity > opacity_threshold
@@ -210,15 +248,10 @@ def remove_gaussians_with_low_opacity(gaussians, opacity_threshold=0.1):
     return new_gaussians
 
 
-def remove_gaussians_with_point_mesh_distance(gaussians, mesh_sampled_points, dist_threshold=0.1):
-    '''
-    Remove gaussians that are far from the mesh
-
-    Args:
-        gaussians (GaussianModel): Gaussian model
-        mesh_sampled_points (Tensor): Sampled points from the mesh
-        dist_threshold (float): Distance threshold (in meters) to remove the gaussians
-    '''
+def remove_gaussians_with_point_mesh_distance(
+    gaussians: GaussianModel, mesh_sampled_points: torch.Tensor, dist_threshold: float = 0.1
+) -> GaussianModel:
+    """Remove gaussians farther than ``dist_threshold`` from a reference mesh."""
 
     gaussians_xyz = gaussians._xyz.detach()
     # dists_knn = ops.knn_points(gaussians_xyz.unsqueeze(0), mesh_sampled_points.unsqueeze(0), K=1, norm=2)

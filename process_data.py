@@ -1,20 +1,34 @@
-import os
-from argparse import ArgumentParser
-import time
-import logging
-import json
-import glob
+"""Utility script to preprocess raw RGB-D data for training."""
 
-parser = ArgumentParser()
+from __future__ import annotations
+
+import glob
+import json
+import logging
+import os
+import time
+from argparse import ArgumentParser
+
+parser = ArgumentParser(description="Run the entire data preprocessing pipeline")
 parser.add_argument(
     "--base_path",
     type=str,
     default="./data/different_types",
+    help="Root directory that contains all scene data",
 )
-parser.add_argument("--case_name", type=str, required=True)
-# The category of the object used for segmentation
-parser.add_argument("--category", type=str, required=True)
-parser.add_argument("--shape_prior", action="store_true", default=False)
+parser.add_argument("--case_name", type=str, required=True, help="Scene name")
+parser.add_argument(
+    "--category",
+    type=str,
+    required=True,
+    help="Category of the object used for segmentation",
+)
+parser.add_argument(
+    "--shape_prior",
+    action="store_true",
+    default=False,
+    help="Generate shape prior before the rest of the pipeline",
+)
 args = parser.parse_args()
 
 # Set the debug flags
@@ -30,13 +44,20 @@ case_name = args.case_name
 category = args.category
 TEXT_PROMPT = f"{category}.hand"
 CONTROLLER_NAME = "hand"
-SHAPE_PRIOR = args.shape_prior
+SHAPE_PRIOR: bool = args.shape_prior
 
 logger = None
 
 
-def setup_logger(log_file="timer.log"):
-    global logger 
+def setup_logger(log_file: str = "timer.log") -> None:
+    """Configure the global :mod:`logging` logger.
+
+    Parameters
+    ----------
+    log_file: str
+        Path to the log file.
+    """
+    global logger
 
     if logger is None:
         logger = logging.getLogger("GlobalLogger")
@@ -56,22 +77,26 @@ def setup_logger(log_file="timer.log"):
 setup_logger()
 
 
-def existDir(dir_path):
+def ensure_dir(dir_path: str) -> None:
+    """Create ``dir_path`` if it does not already exist."""
+
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
 
 class Timer:
-    def __init__(self, task_name):
+    """Context manager to measure execution time of pipeline stages."""
+
+    def __init__(self, task_name: str) -> None:
         self.task_name = task_name
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.start_time = time.time()
         logger.info(
             f"!!!!!!!!!!!! {self.task_name}: Processing {case_name} !!!!!!!!!!!!"
         )
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         elapsed_time = time.time() - self.start_time
         logger.info(
             f"!!!!!!!!!!! Time for {self.task_name}: {elapsed_time:.2f} sec !!!!!!!!!!!!"
@@ -98,7 +123,7 @@ if PROCESS_SHAPE_PRIOR and SHAPE_PRIOR:
             obj_idx = int(key)
     mask_path = f"{base_path}/{case_name}/mask/0/{obj_idx}/0.png"
 
-    existDir(f"{base_path}/{case_name}/shape")
+    ensure_dir(f"{base_path}/{case_name}/shape")
     # Get the high-resolution of the image to prepare for the trellis generation
     with Timer("Image Upscale"):
         if not os.path.isfile(f"{base_path}/{case_name}/shape/high_resolution.png"):

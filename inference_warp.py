@@ -1,7 +1,8 @@
-from qqtt import InvPhyTrainerWarp
 """Entry point for running the inverse physics model in inference mode."""
 
 from __future__ import annotations
+
+from qqtt import InvPhyTrainerWarp
 
 from qqtt.utils import logger, cfg
 from datetime import datetime
@@ -30,13 +31,15 @@ seed: int = 42
 set_all_seeds(seed)
 
 if __name__ == "__main__":
+    """Run the trained model on the specified dataset for inference."""
+
     parser = ArgumentParser()
     parser.add_argument("--base_path", type=str, required=True)
     parser.add_argument("--case_name", type=str, required=True)
     args = parser.parse_args()
 
-    base_path = args.base_path
-    case_name = args.case_name
+    base_path: str = args.base_path
+    case_name: str = args.case_name
 
     # Select configuration based on the dataset type
     if "cloth" in case_name or "package" in case_name:
@@ -46,7 +49,7 @@ if __name__ == "__main__":
 
     logger.info(f"[DATA TYPE]: {cfg.data_type}")
 
-    base_dir = f"experiments/{case_name}"
+    base_dir: str = f"experiments/{case_name}"
 
     # Read the first-satage optimized parameters to set the indifferentiable parameters
     optimal_path = f"experiments_optimization/{case_name}/optimal_params.pkl"

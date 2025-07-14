@@ -9,55 +9,63 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import torch
-from gaussian_splatting.scene import Scene
+"""Render dynamic sequences using pretrained Gaussian models."""
+
+from __future__ import annotations
+
+import copy
 import os
-from tqdm import tqdm
-from os import makedirs
-from gaussian_splatting.gaussian_renderer import render
-import torchvision
-from gaussian_splatting.utils.general_utils import safe_state
+import pickle
 from argparse import ArgumentParser
+from os import makedirs
+from typing import List
+
+import numpy as np
+import torch
+import torchvision
+from kornia import create_meshgrid
+from tqdm import tqdm
+
 from gaussian_splatting.arguments import ModelParams, PipelineParams, get_combined_args
-from gaussian_splatting.gaussian_renderer import GaussianModel
+from gaussian_splatting.dynamic_utils import (
+    create_relation_matrix,
+    get_topk_indices,
+    interpolate_motions,
+    knn_weights,
+    mat2quat,
+    quat2mat,
+)
+from gaussian_splatting.gaussian_renderer import GaussianModel, render
+from gaussian_splatting.scene import Scene
+from gaussian_splatting.utils.general_utils import safe_state
+from gaussian_splatting.arguments import ModelParams, PipelineParams, get_combined_args
 
 try:
     from diff_gaussian_rasterization import SparseGaussianAdam
 
     SPARSE_ADAM_AVAILABLE = True
-except:
+except Exception:
     SPARSE_ADAM_AVAILABLE = False
 
-import numpy as np
-from kornia import create_meshgrid
-import copy
 from gs_render import (
     remove_gaussians_with_mask,
     remove_gaussians_with_low_opacity,
     remove_gaussians_with_point_mesh_distance,
 )
-from gaussian_splatting.dynamic_utils import (
-    interpolate_motions,
-    create_relation_matrix,
-    knn_weights,
-    get_topk_indices,
-    quat2mat,
-    mat2quat,
-)
-import pickle
 
 
 def render_set(
-    output_path,
-    name,
+    output_path: str,
+    name: str,
     views,
-    gaussians_list,
-    pipeline,
-    background,
-    train_test_exp,
-    separate_sh,
-    disable_sh=False,
-):
+    gaussians_list: List[GaussianModel],
+    pipeline: PipelineParams,
+    background: torch.Tensor,
+    train_test_exp: bool,
+    separate_sh: bool,
+    disable_sh: bool = False,
+) -> None:
+    """Render each frame of a dynamic sequence for a subset of camera views."""
 
     render_path = os.path.join(output_path, name)
     makedirs(render_path, exist_ok=True)
@@ -114,7 +122,8 @@ def render_sets(
     remove_gaussians: bool = False,
     name: str = "dynamic",
     output_dir: str = "./gaussian_output_dynamic",
-):
+) -> None:
+    """Roll out dynamics and render each step."""
     with torch.no_grad():
         output_path = output_dir
 
@@ -222,7 +231,16 @@ def render_sets(
         )
 
 
-def rollout(xyz_0, rgb_0, quat_0, opa_0, ctrl_pts, n_steps, device="cuda"):
+def rollout(
+    xyz_0: torch.Tensor,
+    rgb_0: torch.Tensor,
+    quat_0: torch.Tensor,
+    opa_0: torch.Tensor,
+    ctrl_pts: torch.Tensor,
+    n_steps: int,
+    device: str = "cuda",
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Simulate Gaussian motion from control points."""
     # store results
     xyz = xyz_0.cpu()[None].repeat(n_steps, 1, 1)  # (n_steps, n_gaussians, 3)
     rgb = rgb_0.cpu()[None].repeat(n_steps, 1, 1)  # (n_steps, n_gaussians, 3)

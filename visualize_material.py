@@ -1,30 +1,40 @@
 # Experimental feature to approximate the materials in the spring-mass model.
-from qqtt import InvPhyTrainerWarp
-from qqtt.utils import logger, cfg
-import random
-import numpy as np
-import torch
-from argparse import ArgumentParser
+"""Script used to visualize learned material parameters."""
+
+from __future__ import annotations
+
 import glob
+import json
 import os
 import pickle
-import json
+import random
+from argparse import ArgumentParser
+
+import numpy as np
+import torch
+
+from qqtt import InvPhyTrainerWarp
+from qqtt.utils import cfg, logger
 
 
-def set_all_seeds(seed):
+def set_all_seeds(seed: int) -> None:
+    """Seed all relevant random number generators."""
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
-seed = 42
+seed: int = 42
 set_all_seeds(seed)
 
 if __name__ == "__main__":
+    """Entry point for visualizing learned material parameters."""
+
     cfg.load_from_yaml("configs/real.yaml")
 
     parser = ArgumentParser()
@@ -41,15 +51,15 @@ if __name__ == "__main__":
     parser.add_argument("--case_name", type=str, default="double_stretch_sloth")
     args = parser.parse_args()
 
-    base_path = args.base_path
-    case_name = args.case_name
+    base_path: str = args.base_path
+    case_name: str = args.case_name
 
     if "cloth" in case_name or "package" in case_name:
         cfg.load_from_yaml("configs/cloth.yaml")
     else:
         cfg.load_from_yaml("configs/real.yaml")
 
-    base_dir = f"./experiments/{case_name}"
+    base_dir: str = f"./experiments/{case_name}"
 
     # Read the first-satage optimized parameters to set the indifferentiable parameters
     optimal_path = f"./experiments_optimization/{case_name}/optimal_params.pkl"

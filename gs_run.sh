@@ -1,3 +1,7 @@
+#!/bin/bash
+
+# Train a Gaussian Splatting model and render results for each scene
+
 output_dir="./gaussian_output"
 output_video_dir="./gaussian_output_video"
 # scenes=("double_lift_cloth_1" "double_lift_cloth_3" "double_lift_sloth" "double_lift_zebra"
@@ -10,17 +14,18 @@ output_video_dir="./gaussian_output_video"
 #         "single_push_sloth"
 #         "weird_package")
 
-scenes=("double_stretch_sloth")
+scenes=("double_stretch_sloth")  # list of scenes to process
 
 exp_name="init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
 
+# Precompute interpolated camera poses
 python ./gaussian_splatting/generate_interp_poses.py
 
 # Iterate over each folder
 for scene_name in "${scenes[@]}"; do
     echo "Processing: $scene_name"
 
-    # Training
+    # Training phase
     python gs_train.py \
         -s ./data/gaussian_data/${scene_name} \
         -m ${output_dir}/${scene_name}/${exp_name} \
@@ -33,12 +38,12 @@ for scene_name in "${scenes[@]}"; do
         --isotropic \
         --gs_init_opt 'hybrid'
 
-    # Rendering
+    # Rendering phase
     python gs_render.py \
         -s ./data/gaussian_data/${scene_name} \
         -m ${output_dir}/${scene_name}/${exp_name} \
 
-    # Convert images to video
+    # Convert rendered images to a video
     python gaussian_splatting/img2video.py \
         --image_folder ${output_dir}/${scene_name}/${exp_name}/test/ours_10000/renders \
         --video_path ${output_video_dir}/${scene_name}/${exp_name}.mp4

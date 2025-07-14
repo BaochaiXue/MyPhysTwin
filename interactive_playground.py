@@ -1,29 +1,39 @@
-from qqtt import InvPhyTrainerWarp
-from qqtt.utils import logger, cfg
+"""Interactive demo for controlling simulations in real time."""
+
+from __future__ import annotations
+
 from datetime import datetime
-import random
-import numpy as np
-import torch
-from argparse import ArgumentParser
 import glob
+import json
 import os
 import pickle
-import json
+import random
+from argparse import ArgumentParser
 
-def set_all_seeds(seed):
+import numpy as np
+import torch
+
+from qqtt import InvPhyTrainerWarp
+from qqtt.utils import cfg, logger
+
+def set_all_seeds(seed: int) -> None:
+    """Seed all relevant RNGs for reproducibility."""
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
-seed = 42
+seed: int = 42
 set_all_seeds(seed)
 
 if __name__ == "__main__":
+    """Launch the interactive playground using a trained model."""
+
     parser = ArgumentParser()
     parser.add_argument(
         "--base_path",
@@ -47,15 +57,15 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    base_path = args.base_path
-    case_name = args.case_name
+    base_path: str = args.base_path
+    case_name: str = args.case_name
 
     if "cloth" in case_name or "package" in case_name:
         cfg.load_from_yaml("configs/cloth.yaml")
     else:
         cfg.load_from_yaml("configs/real.yaml")
 
-    base_dir = f"./temp_experiments/{case_name}"
+    base_dir: str = f"./temp_experiments/{case_name}"
 
     # Read the first-satage optimized parameters to set the indifferentiable parameters
     optimal_path = f"./experiments_optimization/{case_name}/optimal_params.pkl"

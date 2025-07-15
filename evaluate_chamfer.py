@@ -1,30 +1,38 @@
-import glob
-import pickle
-import json
-import torch
+"""Compute Chamfer distance errors for predicted trajectories."""
+
+from __future__ import annotations
+
 import csv
-import numpy as np
+import glob
+import json
 import os
+import pickle
+from typing import Dict, Iterable
+
+import numpy as np
+import torch
 from pytorch3d.loss import chamfer_distance
 
-prediction_dir = "./experiments"
-base_path = "./data/different_types"
-output_file = "results/final_results.csv"
+prediction_dir: str = "./experiments"
+base_path: str = "./data/different_types"
+output_file: str = "results/final_results.csv"
 
 if not os.path.exists("results"):
     os.makedirs("results")
 
 def evaluate_prediction(
-    start_frame,
-    end_frame,
-    vertices,
-    object_points,
-    object_visibilities,
-    object_motions_valid,
-    num_original_points,
-    num_surface_points,
-):
-    chamfer_errors = []
+    start_frame: int,
+    end_frame: int,
+    vertices: Iterable[np.ndarray | torch.Tensor],
+    object_points: Iterable[np.ndarray | torch.Tensor],
+    object_visibilities: Iterable[np.ndarray | torch.Tensor],
+    object_motions_valid: Iterable[np.ndarray | torch.Tensor],
+    num_original_points: int,
+    num_surface_points: int,
+) -> Dict[str, float]:
+    """Compute Chamfer distance statistics for a frame range."""
+
+    chamfer_errors: list[float] = []
 
     if not isinstance(vertices, torch.Tensor):
         vertices = torch.tensor(vertices, dtype=torch.float32)
@@ -39,18 +47,19 @@ def evaluate_prediction(
         x = vertices[frame_idx]
         current_object_points = object_points[frame_idx]
         current_object_visibilities = object_visibilities[frame_idx]
-        # The motion valid indicates if the tracking is valid from prev_frame
+
+        # Whether the tracking between frames is valid.
         current_object_motions_valid = object_motions_valid[frame_idx - 1]
 
-        # Compute the single-direction chamfer loss for the object points
+        # Compute the one-way Chamfer loss between predicted and ground-truth
+        # points visible in this frame.
         chamfer_object_points = current_object_points[current_object_visibilities]
         chamfer_x = x[:num_surface_points]
-        # The GT chamfer_object_points can be partial,first find the nearest in second
         chamfer_error = chamfer_distance(
             chamfer_object_points.unsqueeze(0),
             chamfer_x.unsqueeze(0),
             single_directional=True,
-            norm=1,  # Get the L1 distance
+            norm=1,
         )[0]
 
         chamfer_errors.append(chamfer_error.item())
@@ -66,6 +75,7 @@ def evaluate_prediction(
 
 
 if __name__ == "__main__":
+    # Open the output CSV file for writing.
     file = open(output_file, mode="w", newline="", encoding="utf-8")
     writer = csv.writer(file)
 
@@ -84,11 +94,11 @@ if __name__ == "__main__":
         case_name = dir_name.split("/")[-1]
         print(f"Processing {case_name}")
 
-        # Read the trajectory data
+        # Load predicted vertices produced by inference.
         with open(f"{dir_name}/inference.pkl", "rb") as f:
             vertices = pickle.load(f)
 
-        # Read the GT object points and masks
+        # Load ground truth point clouds and visibilities.
         with open(f"{base_path}/{case_name}/final_data.pkl", "rb") as f:
             data = pickle.load(f)
 
@@ -99,6 +109,7 @@ if __name__ == "__main__":
         num_surface_points = num_original_points + data["surface_points"].shape[0]
 
         # read the train/test split
+        # Frame split for training and testing.
         with open(f"{base_path}/{case_name}/split.json", "r") as f:
             split = json.load(f)
         train_frame = split["train"][1]

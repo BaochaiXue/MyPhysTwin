@@ -1,29 +1,46 @@
-import pickle
-import glob
+"""Evaluate tracking accuracy of predicted vertex trajectories."""
+
+from __future__ import annotations
+
 import csv
+import glob
 import json
+import pickle
+from typing import Iterable
+
 import numpy as np
 from scipy.spatial import KDTree
 
-base_path = "./data/different_types"
-prediction_path = "experiments"
-output_file = "results/final_track.csv"
+base_path: str = "./data/different_types"
+prediction_path: str = "experiments"
+output_file: str = "results/final_track.csv"
 
 
-def evaluate_prediction(start_frame, end_frame, vertices, gt_track_3d, idx, mask):
-    track_errors = []
+def evaluate_prediction(
+    start_frame: int,
+    end_frame: int,
+    vertices: Iterable[np.ndarray],
+    gt_track_3d: Iterable[np.ndarray],
+    idx: np.ndarray,
+    mask: np.ndarray,
+) -> float:
+    """Compute mean L2 tracking error for a frame range."""
+
+    track_errors: list[float] = []
     for frame_idx in range(start_frame, end_frame):
-        # Get the new mask and see
+        # Mask out missing tracking points for this frame.
         new_mask = ~np.isnan(gt_track_3d[frame_idx][mask]).any(axis=1)
         gt_track_points = gt_track_3d[frame_idx][mask][new_mask]
         pred_x = vertices[frame_idx][idx][new_mask]
+
         if len(pred_x) == 0:
-            track_error = 0
+            track_error = 0.0
         else:
             track_error = np.mean(np.linalg.norm(pred_x - gt_track_points, axis=1))
-        
+
         track_errors.append(track_error)
-    return np.mean(track_errors)
+
+    return float(np.mean(track_errors))
 
 
 file = open(output_file, mode="w", newline="", encoding="utf-8")
@@ -39,8 +56,6 @@ writer.writerow(
 dir_names = glob.glob(f"{base_path}/*")
 for dir_name in dir_names:
     case_name = dir_name.split("/")[-1]
-    # if case_name != "single_lift_dinosor":
-    #     continue
     print(f"Processing {case_name}!!!!!!!!!!!!!!!")
 
     with open(f"{base_path}/{case_name}/split.json", "r") as f:
@@ -55,7 +70,7 @@ for dir_name in dir_names:
     with open(f"{base_path}/{case_name}/gt_track_3d.pkl", "rb") as f:
         gt_track_3d = pickle.load(f)
 
-    # Locate the index of corresponding point index in the vertices, if nan, then ignore the points
+    # Indices of valid tracking points in the first frame.
     mask = ~np.isnan(gt_track_3d[0]).any(axis=1)
 
     kdtree = KDTree(vertices[0])

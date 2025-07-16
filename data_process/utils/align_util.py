@@ -1,3 +1,5 @@
+"""Alignment utilities for projecting points and rendering meshes."""
+
 import numpy as np
 import torch
 import trimesh

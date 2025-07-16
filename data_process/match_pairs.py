@@ -43,6 +43,7 @@
 # %AUTHORS_END%
 # --------------------------------------------------------------------*/
 # %BANNER_END%
+"""Utilities for matching keypoints between images using SuperPoint and SuperGlue."""
 
 from pathlib import Path
 import argparse
@@ -65,25 +66,50 @@ torch.set_grad_enabled(False)
 
 
 def image_pair_matching(
-    input_images,
-    ref_image,
-    output_dir,
-    resize=[-1],
-    resize_float=False,
-    superglue="indoor",
-    max_keypoints=1024,
-    keypoint_threshold=0.005,
-    nms_radius=4,
-    sinkhorn_iterations=20,
-    match_threshold=0.2,
-    viz=False,
-    fast_viz=False,
-    cache=True,
-    show_keypoints=False,
-    viz_extension="png",
-    save=False,
-    viz_best=True,
-):
+    input_images: Sequence[np.ndarray],
+    ref_image: np.ndarray,
+    output_dir: str,
+    resize: Sequence[int] | None = [-1],
+    resize_float: bool = False,
+    superglue: str = "indoor",
+    max_keypoints: int = 1024,
+    keypoint_threshold: float = 0.005,
+    nms_radius: int = 4,
+    sinkhorn_iterations: int = 20,
+    match_threshold: float = 0.2,
+    viz: bool = False,
+    fast_viz: bool = False,
+    cache: bool = True,
+    show_keypoints: bool = False,
+    viz_extension: str = "png",
+    save: bool = False,
+    viz_best: bool = True,
+) -> tuple[int, dict]:
+    """Match features between input images and a reference image using SuperGlue.
+
+    Args:
+        input_images: List of image arrays to match.
+        ref_image: The reference image used for matching.
+        output_dir: Directory to save intermediate results.
+        resize: Optional resize setting for images.
+        resize_float: If True, resize using float precision.
+        superglue: Pretrained SuperGlue weights to use.
+        max_keypoints: Maximum keypoints detected per image.
+        keypoint_threshold: Detector threshold.
+        nms_radius: NMS radius for keypoints.
+        sinkhorn_iterations: Sinkhorn iterations in SuperGlue.
+        match_threshold: Matching threshold.
+        viz: Whether to save matching visualisations.
+        fast_viz: Use fast visualisation.
+        cache: Reuse cached matches if available.
+        show_keypoints: Display keypoints in visualisations.
+        viz_extension: File format for visualisation images.
+        save: Save match result arrays.
+        viz_best: Visualise the best matching pair.
+
+    Returns:
+        Tuple of index of the best pose and match dictionary for that pose.
+    """
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print('Running inference on device "{}"'.format(device))

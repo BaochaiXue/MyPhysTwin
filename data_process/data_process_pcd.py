@@ -1,3 +1,4 @@
+"""Utilities for merging RGB-D frames into coloured point clouds."""
 # Merge the RGB-D data from multiple cameras into a single point cloud in world coordinate
 # Do some depth filtering to make the point cloud more clean
 
@@ -25,18 +26,19 @@ case_name = args.case_name
 
 # Use code from https://github.com/Jianghanxiao/Helper3D/blob/master/open3d_RGBD/src/camera/cameraHelper.py
 def getCamera(
-    transformation,
-    fx,
-    fy,
-    cx,
-    cy,
-    scale=1,
-    coordinate=True,
-    shoot=False,
-    length=4,
-    color=np.array([0, 1, 0]),
-    z_flip=False,
-):
+    transformation: np.ndarray,
+    fx: float,
+    fy: float,
+    cx: float,
+    cy: float,
+    scale: float = 1,
+    coordinate: bool = True,
+    shoot: bool = False,
+    length: float = 4,
+    color: np.ndarray = np.array([0, 1, 0]),
+    z_flip: bool = False,
+) -> list[o3d.geometry.Geometry]:
+    """Create a list of meshes representing the camera frustum."""
     # Return the camera and its corresponding frustum framework
     if coordinate:
         camera = o3d.geometry.TriangleMesh.create_coordinate_frame(size=scale)
@@ -83,9 +85,11 @@ def getCamera(
 
 # Use code from https://github.com/Jianghanxiao/Helper3D/blob/master/open3d_RGBD/src/model/pcdHelper.py
 def getPcdFromDepth(
-    depth,
-    intrinsic,
-):
+    depth: np.ndarray,
+    intrinsic: np.ndarray,
+) -> np.ndarray:
+    """Convert a depth map to a point cloud using the given intrinsic matrix."""
+
     # Depth in meters
     height, width = np.shape(depth)
 
@@ -113,7 +117,14 @@ def getPcdFromDepth(
     return points
 
 
-def get_pcd_from_data(path, frame_idx, num_cam, intrinsics, c2ws):
+def get_pcd_from_data(
+    path: str,
+    frame_idx: int,
+    num_cam: int,
+    intrinsics: np.ndarray,
+    c2ws: Sequence[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load depth/color frames and transform them into world coordinate point clouds."""
     total_points = []
     total_colors = []
     total_masks = []
@@ -168,7 +179,8 @@ def get_pcd_from_data(path, frame_idx, num_cam, intrinsics, c2ws):
     return total_points, total_colors, total_masks
 
 
-def exist_dir(dir):
+def exist_dir(dir: str) -> None:
+    """Create directory if it does not already exist."""
     if not os.path.exists(dir):
         os.makedirs(dir)
 

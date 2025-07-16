@@ -1,3 +1,4 @@
+"""Post-process segmentation masks and remove outlier points."""
 # Process the mask data to filter out the outliers and generate the processed masks
 
 import numpy as np
@@ -27,19 +28,26 @@ CONTROLLER_NAME = args.controller_name
 processed_masks = {}
 
 
-def exist_dir(dir):
+def exist_dir(dir: str) -> None:
+    """Create directory if it does not exist."""
     if not os.path.exists(dir):
         os.makedirs(dir)
 
 
-def read_mask(mask_path):
-    # Convert the white mask into binary mask
+def read_mask(mask_path: str) -> np.ndarray:
+    """Load a binary mask image."""
     mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-    mask = mask > 0
-    return mask
+    return mask > 0
 
 
-def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
+def process_pcd_mask(
+    frame_idx: int,
+    pcd_path: str,
+    mask_path: str,
+    mask_info: dict,
+    num_cam: int,
+) -> tuple[o3d.geometry.PointCloud, o3d.geometry.PointCloud]:
+    """Process a single frame and return filtered object and controller point clouds."""
     global processed_masks
     processed_masks[frame_idx] = {}
 

@@ -1,3 +1,4 @@
+"""Generate shape priors using the TRELLIS pipeline."""
 import os
 
 # os.environ['ATTN_BACKEND'] = 'xformers'   # Can be 'flash-attn' or 'xformers', default is 'flash-attn'
@@ -24,10 +25,14 @@ img_path = args.img_path
 output_dir = args.output_dir
 
 # Load a pipeline from a model folder or a Hugging Face model hub.
+# Initialize the pretrained TRELLIS pipeline
+
 pipeline = TrellisImageTo3DPipeline.from_pretrained("JeffreyXiang/TRELLIS-image-large")
 pipeline.cuda()
 
 final_im = Image.open(img_path).convert("RGBA")
+# Execute the conversion from image to 3D representation
+
 assert not np.all(np.array(final_im)[:, :, 3] == 255)
 
 # Run the pipeline

@@ -1244,17 +1244,20 @@ class InvPhyTrainerWarp:
                             prev_x, K=16
                         )  # only computed in the first iteration
 
-                    if weights is None:
-                        weights, weights_indices = knn_weights_sparse(
-                            prev_particle_pos, current_pos, K=16
-                        )  # only computed in the first iteration
-
                     interp_timer.start()
 
+                    knn_weights_timer.start()
+                    if weights is None:
+                        _, weights_indices = knn_weights_sparse(
+                            prev_particle_pos, current_pos, K=16
+                        )  # only computed in the first iteration
                     weights = calc_weights_vals_from_indices(
                         prev_particle_pos, current_pos, weights_indices
                     )
+                    knn_time = knn_weights_timer.stop()
+                    component_times["knn_weights"].append(knn_time)
 
+                    motion_interp_timer.start()
                     current_pos, current_rot, _ = interpolate_motions_speedup(
                         bones=prev_particle_pos,
                         motions=cur_particle_pos - prev_particle_pos,
@@ -1264,6 +1267,8 @@ class InvPhyTrainerWarp:
                         xyz=current_pos,
                         quat=current_rot,
                     )
+                    motion_time = motion_interp_timer.stop()
+                    component_times["motion_interp"].append(motion_time)
 
                     # update gaussians with the new positions and rotations
                     gaussians._xyz = current_pos

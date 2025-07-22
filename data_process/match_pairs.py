@@ -53,6 +53,7 @@ import matplotlib.cm as cm
 import torch
 import sys
 import os
+from typing import Sequence
 
 sys.path.append(os.getcwd())
 from models.matching import Matching

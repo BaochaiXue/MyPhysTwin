@@ -7,6 +7,7 @@ import cv2
 import json
 import torch
 import os
+from typing import Sequence
 from utils.align_util import (
     render_multi_images,
     render_image,

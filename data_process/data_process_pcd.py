@@ -10,6 +10,7 @@ import cv2
 from tqdm import tqdm
 import os
 from argparse import ArgumentParser
+from typing import Sequence
 
 parser = ArgumentParser()
 parser.add_argument(

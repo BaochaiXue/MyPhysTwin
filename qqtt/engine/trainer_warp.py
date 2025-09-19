@@ -984,12 +984,14 @@ class InvPhyTrainerWarp:
 
         vis_controller_points = current_target.cpu().numpy()
 
+        ###### 3d Gaussian Splatting ######
         gaussians = GaussianModel(sh_degree=3)
         gaussians.load_ply(gs_path)
         gaussians = remove_gaussians_with_low_opacity(gaussians, 0.1)
         gaussians.isotropic = True
         current_pos = gaussians.get_xyz
         current_rot = gaussians.get_rotation
+        ###### 3d Gaussian Splatting ######
         use_white_background = True  # set to True for white background
         bg_color = [1, 1, 1] if use_white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -1177,9 +1179,11 @@ class InvPhyTrainerWarp:
             render_timer.start()
 
             # render with gaussians and paste the image on top of the frame
+            ###### 3d Gaussian Splatting ######
             results = render_gaussian(view, gaussians, None, background)
             rendering = results["render"]  # (4, H, W)
             image = rendering.permute(1, 2, 0).detach()
+            ###### 3d Gaussian Splatting ######
 
             render_time = render_timer.stop()
             component_times["rendering"].append(render_time)
@@ -1263,6 +1267,7 @@ class InvPhyTrainerWarp:
             if prev_x is not None:
                 with torch.no_grad():
 
+                    ###### 3d Gaussian Splatting ######
                     prev_particle_pos = prev_x
                     cur_particle_pos = x
 
@@ -1295,6 +1300,7 @@ class InvPhyTrainerWarp:
                     # update gaussians with the new positions and rotations
                     gaussians._xyz = current_pos
                     gaussians._rotation = current_rot
+                    ###### 3d Gaussian Splatting ######
 
                 interp_time = interp_timer.stop()
                 component_times["full_motion_interpolation"].append(interp_time)
@@ -1374,6 +1380,7 @@ class InvPhyTrainerWarp:
 
     def _transform_gs(self, gaussians, M, majority_scale=1):
 
+        ###### 3d Gaussian Splatting ######
         new_gaussians = copy.copy(gaussians)
 
         new_xyz = gaussians.get_xyz.clone()
@@ -1402,8 +1409,10 @@ class InvPhyTrainerWarp:
         new_gaussians._scaling = new_scales
 
         return new_gaussians
+        ###### 3d Gaussian Splatting ######
 
     def _create_gs_view(self, w2c, intrinsic, height, width):
+        ###### 3d Gaussian Splatting ######
         R = np.transpose(w2c[:3, :3])
         T = w2c[:3, 3]
         K = torch.tensor(intrinsic, dtype=torch.float32, device="cuda")
@@ -1432,6 +1441,7 @@ class InvPhyTrainerWarp:
             depth=None,
             occ_mask=None,
         )
+        ###### 3d Gaussian Splatting ######
         return view
 
     def visualize_force(self, model_path, gs_path, n_ctrl_parts=2, force_scale=30000):

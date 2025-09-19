@@ -195,6 +195,7 @@ def remove_gaussians_with_mask(gaussians, views):
 
 def remove_gaussians_with_low_opacity(gaussians, opacity_threshold=0.1):
 
+    ###### 3d Gaussian Splatting ######
     opacity = gaussians.get_opacity.squeeze(-1)
     mask3d = opacity > opacity_threshold
     print(f"Removing {len(mask3d) - mask3d.sum()} gaussians with opacity < 0.1")
@@ -206,7 +207,7 @@ def remove_gaussians_with_low_opacity(gaussians, opacity_threshold=0.1):
     new_gaussians._scaling = gaussians._scaling[mask3d]
     new_gaussians._rotation = gaussians._rotation[mask3d]
     new_gaussians._opacity = gaussians._opacity[mask3d]
-
+    ###### 3d Gaussian Splatting ######
     return new_gaussians
 
 

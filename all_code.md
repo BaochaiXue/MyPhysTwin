@@ -4481,6 +4481,220 @@ class Visualizer:
 
 '''
 
+docker_scripts/build.sh
+'''bash
+#!/bin/bash
+
+# Accept arguments
+username="${DOCKER_USERNAME:-$(whoami)}"
+
+# CUDA architecture settings
+# You can find the list of CUDA architectures here: https://developer.nvidia.com/cuda-gpus
+arch="${1:-8.6+PTX}"
+
+# Construct image name
+image_name="$username/phystwin:1.0"
+
+# Print build information
+echo "Building Docker image with:"
+echo "  Username: $username"
+echo "  CUDA Architecture: $arch"
+echo "  Image Name: $image_name"
+
+# Build the Docker image
+docker build --build-arg TORCH_CUDA_ARCH_LIST=$arch -t $image_name . || { echo "Docker build failed"; exit 1; }
+'''
+
+docker_scripts/run.sh
+'''bash
+#!/bin/bash
+
+# Load arguments
+username="${DOCKER_USERNAME:-$(whoami)}"
+data_dir=$1
+experiments_dir=$2
+experiments_optimization_dir=$3
+gaussian_output_dir=$4
+
+# Check if the Docker image is available
+if ! docker image inspect $username/phystwin:1.0 > /dev/null 2>&1; then
+    echo "Docker image $username/phystwin:1.0 not found. Please build the image first."
+    exit 1
+fi
+
+# Check if the X11 server is running
+if ! pgrep -x "Xorg" > /dev/null; then
+    echo "X11 server is not running. Please start the X11 server first."
+    exit 1
+fi
+
+# Allow access to the X11 server for local connections
+# This command allows the root user to access the X11 server
+# without needing to enter a password. This is necessary for GUI applications
+# running inside the Docker container to display on the host machine.
+# Note: This command may have security implications, so use it with caution.
+# It is recommended to use this command only in a trusted environment.
+xhost +local:root
+
+docker run --gpus 'all,"capabilities=compute,utility,graphics"' \
+    -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY \
+    -v $data_dir:/PhysTwin/data \
+    -v $experiments_dir:/PhysTwin/experiments \
+    -v $experiments_optimization_dir:/PhysTwin/experiments_optimization \
+    -v $gaussian_output_dir:/PhysTwin/gaussian_output \
+    --privileged --entrypoint /bin/bash -it $username/phystwin:1.0
+'''
+
+env_install/5090_env_install.sh
+'''bash
+conda install -y numpy==1.26.4
+pip install warp-lang
+pip install usd-core matplotlib
+pip install "pyglet<2"
+pip install open3d
+pip install trimesh
+pip install rtree 
+pip install pyrender
+
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip install stannum
+pip install termcolor
+pip install fvcore
+pip install wandb
+pip install moviepy imageio
+conda install -y opencv
+pip install cma
+
+# Install the env for realsense camera
+pip install Cython
+pip install pyrealsense2
+pip install atomics
+pip install pynput
+
+# Install the env for grounded-sam-2
+git clone https://github.com/IDEA-Research/Grounded-SAM-2.git
+cd Grounded-SAM-2/checkpoints/
+bash download_ckpts.sh
+cd ../gdino_checkpoints/
+bash download_ckpts.sh
+cd ../
+pip install -e .
+pip install --no-build-isolation -e grounding_dino
+
+# Install the env for image upscaler using SDXL
+pip install diffusers
+pip install accelerate
+
+pip install gsplat==1.4.0
+pip install kornia
+cd gaussian_splatting/submodules/diff-gaussian-rasterization/
+python setup.py build_ext --inplace
+pip install -e .
+cd ../simple-knn/
+pip install -e .
+cd ../../../
+
+pip install plyfile
+
+git clone https://github.com/facebookresearch/pytorch3d.git
+cd pytorch3d/
+pip install -e .
+cd ../
+
+pip install einops
+
+# Install the env for trellis
+cd data_process
+git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git
+cd TRELLIS
+. ./setup.sh --basic --xformers --flash-attn --diffoctreerast --spconv --mipgaussian --kaolin --nvdiffrast
+cd ../..
+
+wget https://github.com/Zarrac/flashattention-blackwell-wheels-whl-ONLY-5090-5080-5070-5060-flash-attention-/releases/download/FlashAttention/flash_attn-2.7.4.post1-rtx5090-torch2.7.0cu128cxx11abiTRUE-cp310-linux_x86_64.whl
+mv flash_attn-2.7.4.post1-rtx5090-torch2.7.0cu128cxx11abiTRUE-cp310-linux_x86_64.whl flash_attn-2.7.4.post1-0rtx5090torch270cu128cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+pip install flash_attn-2.7.4.post1-0rtx5090torch270cu128cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+rm flash_attn-2.7.4.post1-0rtx5090torch270cu128cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+
+'''
+
+env_install/download_pretrained_models.sh
+'''bash
+# Download the checkpoints for GroundedSAM2
+mkdir data_process/groundedSAM_checkpoints
+cd data_process/groundedSAM_checkpoints
+wget https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt
+wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
+cd ../..
+
+# Download the checkpoints for superglue
+mkdir data_process/models/weights
+cd data_process/models/weights
+wget https://github.com/magicleap/SuperGluePretrainedNetwork/raw/refs/heads/master/models/weights/superglue_indoor.pth
+wget https://github.com/magicleap/SuperGluePretrainedNetwork/raw/refs/heads/master/models/weights/superglue_outdoor.pth
+wget https://github.com/magicleap/SuperGluePretrainedNetwork/raw/refs/heads/master/models/weights/superpoint_v1.pth
+cd ../../..
+
+'''
+
+env_install/env_install.sh
+'''bash
+conda install -y numpy==1.26.4
+pip install warp-lang
+pip install usd-core matplotlib
+pip install "pyglet<2"
+pip install open3d
+pip install trimesh
+pip install rtree 
+pip install pyrender
+
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+pip install stannum
+pip install termcolor
+pip install fvcore
+pip install wandb
+pip install moviepy imageio
+conda install -y opencv
+pip install cma
+pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt240/download.html
+
+# Install the env for realsense camera
+pip install Cython
+pip install pyrealsense2
+pip install atomics
+pip install pynput
+
+# Install the env for grounded-sam-2
+pip install git+https://github.com/IDEA-Research/Grounded-SAM-2.git
+pip install git+https://github.com/IDEA-Research/GroundingDINO.git
+
+# Install the env for image upscaler using SDXL
+pip install diffusers
+pip install accelerate
+
+# Install the env for trellis
+cd data_process
+git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git
+cd TRELLIS
+. ./setup.sh --basic --xformers --flash-attn --diffoctreerast --spconv --mipgaussian --kaolin --nvdiffrast
+
+cd ../..
+
+pip install gsplat==1.4.0
+pip install kornia
+cd gaussian_splatting/
+pip install submodules/diff-gaussian-rasterization/
+pip install submodules/simple-knn/
+cd ..
+
+'''
+
+evaluate.sh
+'''bash
+python evaluate_chamfer.py
+python evaluate_track.py
+python gaussian_splatting/evaluate_render.py
+'''
+
 evaluate_chamfer.py
 '''python
 import glob
@@ -11076,18 +11290,40 @@ generate_all_code_md.py
 from pathlib import Path
 
 
+def is_bash_script(p: Path) -> bool:
+    """只读首行，判断 shebang 是否指向 bash。"""
+    try:
+        with p.open("r", encoding="utf-8", errors="ignore") as f:
+            first = f.readline()
+        return first.startswith("#!") and "bash" in first
+    except Exception:
+        return False
+
+
 def main():
     root = Path(__file__).resolve().parent
     output = root / "all_code.md"
 
+    # 收集：.py/.yml/.yaml + .sh/.bash +（无扩展名但 shebang 指向 bash）
+    candidates = set()
+    for pat in ("*.py", "*.yml", "*.yaml", "*.sh", "*.bash"):
+        candidates.update(root.rglob(pat))
+    for p in root.rglob("*"):
+        if p.is_file() and not p.suffix and is_bash_script(p):
+            candidates.add(p)
+
     with output.open("w", encoding="utf-8") as md:
-        # 统一收集并排序 .py / .yml / .yaml
-        for p in sorted(
-            [*root.rglob("*.py"), *root.rglob("*.yml"), *root.rglob("*.yaml")]
-        ):
+        for p in sorted(candidates):
             relative_path = p.relative_to(root)
             md.write(f"{relative_path}\n")
-            lang = "python" if p.suffix == ".py" else "yaml"
+            if p.suffix == ".py":
+                lang = "python"
+            elif p.suffix in {".yml", ".yaml"}:
+                lang = "yaml"
+            elif p.suffix in {".sh", ".bash"} or (not p.suffix and is_bash_script(p)):
+                lang = "bash"
+            else:
+                continue  # 理论上不会走到这里；保守起见跳过
             md.write(f"'''{lang}\n")
             md.write(p.read_text(encoding="utf-8"))
             md.write("\n'''\n\n")
@@ -11668,6 +11904,134 @@ if __name__ == "__main__":
     with open("./rendering_finished_dynamic.txt", "a") as f:
         f.write("Rendering finished of " + args.name + "\n")
 
+'''
+
+gs_run.sh
+'''bash
+output_dir="./gaussian_output"
+output_video_dir="./gaussian_output_video"
+# scenes=("double_lift_cloth_1" "double_lift_cloth_3" "double_lift_sloth" "double_lift_zebra"
+#         "double_stretch_sloth" "double_stretch_zebra"
+#         "rope_double_hand"
+#         "single_clift_cloth_1" "single_clift_cloth_3"
+#         "single_lift_cloth" "single_lift_cloth_1" "single_lift_cloth_3" "single_lift_cloth_4"
+#         "single_lift_dinosor" "single_lift_rope" "single_lift_sloth" "single_lift_zebra"
+#         "single_push_rope" "single_push_rope_1" "single_push_rope_4"
+#         "single_push_sloth"
+#         "weird_package")
+
+scenes=("double_stretch_sloth")
+
+exp_name="init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0"
+
+python ./gaussian_splatting/generate_interp_poses.py
+
+# Iterate over each folder
+for scene_name in "${scenes[@]}"; do
+    echo "Processing: $scene_name"
+
+    # Training
+    python gs_train.py \
+        -s ./data/gaussian_data/${scene_name} \
+        -m ${output_dir}/${scene_name}/${exp_name} \
+        --iterations 10000 \
+        --lambda_depth 0.001 \
+        --lambda_normal 0.0 \
+        --lambda_anisotropic 0.0 \
+        --lambda_seg 1.0 \
+        --use_masks \
+        --isotropic \
+        --gs_init_opt 'hybrid'
+
+    # Rendering
+    python gs_render.py \
+        -s ./data/gaussian_data/${scene_name} \
+        -m ${output_dir}/${scene_name}/${exp_name} \
+
+    # Convert images to video
+    python gaussian_splatting/img2video.py \
+        --image_folder ${output_dir}/${scene_name}/${exp_name}/test/ours_10000/renders \
+        --video_path ${output_video_dir}/${scene_name}/${exp_name}.mp4
+done
+
+'''
+
+gs_run_simulate.sh
+'''bash
+output_dir="./gaussian_output_dynamic"
+
+# views=("0" "1" "2")
+views=("0")
+
+# scenes=("double_lift_cloth_1" "double_lift_cloth_3" "double_lift_sloth" "double_lift_zebra"
+#         "double_stretch_sloth" "double_stretch_zebra"
+#         "rope_double_hand"
+#         "single_clift_cloth_1" "single_clift_cloth_3"
+#         "single_lift_cloth" "single_lift_cloth_1" "single_lift_cloth_3" "single_lift_cloth_4"
+#         "single_lift_dinosor" "single_lift_rope" "single_lift_sloth" "single_lift_zebra"
+#         "single_push_rope" "single_push_rope_1" "single_push_rope_4"
+#         "single_push_sloth"
+#         "weird_package")
+
+scenes=("double_stretch_sloth")
+
+exp_name='init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0'
+
+for scene_name in "${scenes[@]}"; do
+
+    python gs_render_dynamics.py \
+        -s ./data/gaussian_data/${scene_name} \
+        -m ./gaussian_output/${scene_name}/${exp_name} \
+        --name ${scene_name} \
+
+    for view_name in "${views[@]}"; do
+        # Convert images to video
+        python gaussian_splatting/img2video.py \
+            --image_folder ${output_dir}/${scene_name}/${view_name} \
+            --video_path ${output_dir}/${scene_name}/${view_name}.mp4
+    done
+
+done
+'''
+
+gs_run_simulate_white.sh
+'''bash
+output_dir="./gaussian_output_dynamic_white"
+
+# views=("0" "1" "2")
+views=("0")
+
+# scenes=("double_lift_cloth_1" "double_lift_cloth_3" "double_lift_sloth" "double_lift_zebra"
+#         "double_stretch_sloth" "double_stretch_zebra"
+#         "rope_double_hand"
+#         "single_clift_cloth_1" "single_clift_cloth_3"
+#         "single_lift_cloth" "single_lift_cloth_1" "single_lift_cloth_3" "single_lift_cloth_4"
+#         "single_lift_dinosor" "single_lift_rope" "single_lift_sloth" "single_lift_zebra"
+#         "single_push_rope" "single_push_rope_1" "single_push_rope_4"
+#         "single_push_sloth"
+#         "weird_package")
+
+scenes=("double_stretch_sloth")
+
+exp_name='init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0'
+
+for scene_name in "${scenes[@]}"; do
+
+    python gs_render_dynamics.py \
+        -s ./data/gaussian_data/${scene_name} \
+        -m ./gaussian_output/${scene_name}/${exp_name} \
+        --name ${scene_name} \
+        --white_background
+        --output_dir ${output_dir}/${scene_name}
+
+    for view_name in "${views[@]}"; do
+        # Convert images to video
+        python gaussian_splatting/img2video.py \
+            --image_folder ${output_dir}/${scene_name}/${view_name} \
+            --video_path ${output_dir}/${scene_name}/${view_name}.mp4
+    done
+
+done
 '''
 
 gs_train.py
@@ -18751,6 +19115,18 @@ for dir_name in dir_names:
         f"python train_warp.py --base_path {base_path} --case_name {case_name} --train_frame {train_frame}"
     )
 
+'''
+
+temp.sh
+'''bash
+# python script_optimize.py
+# python script_train.py
+# python script_inference.py
+
+# python export_gaussian_data.py
+# python export_video_human_mask.py
+
+bash gs_run.sh
 '''
 
 train_warp.py

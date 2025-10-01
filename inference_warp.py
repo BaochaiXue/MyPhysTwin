@@ -9,6 +9,7 @@ import glob
 import os
 import pickle
 import json
+import re
 
 
 def set_all_seeds(seed):
@@ -70,6 +71,30 @@ if __name__ == "__main__":
         base_dir=base_dir,
         pure_inference_mode=True,
     )
-    assert len(glob.glob(f"{base_dir}/train/best_*.pth")) > 0
-    best_model_path = glob.glob(f"{base_dir}/train/best_*.pth")[0]
+    expected_springs = trainer.simulator.n_springs
+
+    def _extract_epoch(path: str) -> int:
+        match = re.search(r"best_(\\d+)", os.path.basename(path))
+        return int(match.group(1)) if match else -1
+
+    candidate_paths = sorted(glob.glob(f"{base_dir}/train/best_*.pth"))
+    assert candidate_paths, f"No checkpoint found under {base_dir}/train"
+
+    matching_models = []
+    for path in candidate_paths:
+        checkpoint = torch.load(path, map_location=cfg.device)
+        spring_len = len(checkpoint.get("spring_Y", []))
+        if spring_len == expected_springs:
+            matching_models.append((_extract_epoch(path), path))
+        else:
+            logger.warning(
+                f"Skip {path}: checkpoint has {spring_len} springs, expected {expected_springs}"
+            )
+
+    assert (
+        matching_models
+    ), "No checkpoint matches current topology. Check experiments directory or regenerate models."
+    # Pick the checkpoint with the highest epoch among the matches.
+    matching_models.sort(reverse=True)
+    best_model_path = matching_models[0][1]
     trainer.test(best_model_path)

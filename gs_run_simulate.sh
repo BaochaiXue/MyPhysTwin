@@ -1,7 +1,7 @@
 output_dir="./gaussian_output_dynamic"
 
-# views=("0" "1" "2")
-views=("0")
+views=("0" "1" "2")
+#views=("0")
 
 scenes=("double_lift_cloth_1" "double_lift_cloth_3" "double_lift_sloth" "double_lift_zebra"
         "double_stretch_sloth" "double_stretch_zebra"
@@ -13,7 +13,7 @@ scenes=("double_lift_cloth_1" "double_lift_cloth_3" "double_lift_sloth" "double_
         "single_push_sloth"
         "weird_package")
 
-scenes=("double_stretch_sloth")
+#scenes=("double_stretch_sloth")
 
 exp_name='init=hybrid_iso=True_ldepth=0.001_lnormal=0.0_laniso_0.0_lseg=1.0'
 

@@ -1,6 +1,3 @@
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SAM2_CONSTRAINTS_FILE="${SCRIPT_DIR}/pip_constraints.txt"
-
 pip install numpy==1.26.4
 pip install charset-normalizer
 pip install warp-lang
@@ -28,12 +25,7 @@ pip install atomics
 pip install pynput
 
 # Install the env for grounded-sam-2
-# pip install git+https://github.com/IDEA-Research/Grounded-SAM-2.git
-git clone https://github.com/facebookresearch/sam2.git 
-cd sam2
-pip install -e ".[notebooks]" -c "${SAM2_CONSTRAINTS_FILE}"
-cd ..
-rm -rf sam2
+pip install --no-build-isolation git+https://github.com/IDEA-Research/Grounded-SAM-2.git
 pip install git+https://github.com/IDEA-Research/GroundingDINO.git
 
 # Install the env for image upscaler using SDXL

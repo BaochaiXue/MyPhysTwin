@@ -25,7 +25,7 @@ pip install atomics
 pip install pynput
 
 # Install the env for grounded-sam-2
-pip install --no-build-isolation git+https://github.com/IDEA-Research/Grounded-SAM-2.git
+pip install git+https://github.com/IDEA-Research/Grounded-SAM-2.git
 pip install git+https://github.com/IDEA-Research/GroundingDINO.git
 
 # Install the env for image upscaler using SDXL

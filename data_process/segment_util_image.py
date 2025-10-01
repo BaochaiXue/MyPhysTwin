@@ -71,6 +71,15 @@ h, w, _ = image_source.shape
 boxes = boxes * torch.Tensor([w, h, w, h])
 input_boxes = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
 
+conf_values = (
+    confidences.detach().cpu().numpy().tolist()
+    if hasattr(confidences, "detach")
+    else confidences
+)
+print(
+    f"[GroundingDINO Debug] boxes shape={input_boxes.shape}, confidences={conf_values}"
+)
+
 
 # FIXME: figure how does this influence the G-DINO model
 torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()

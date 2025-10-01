@@ -36,7 +36,7 @@ logger = None
 
 
 def setup_logger(log_file="timer.log"):
-    global logger 
+    global logger
 
     if logger is None:
         logger = logging.getLogger("GlobalLogger")

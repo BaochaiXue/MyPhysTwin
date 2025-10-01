@@ -36,6 +36,7 @@ pip install accelerate
 cd data_process
 git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git
 cd TRELLIS
+cp ../../setup_tre_back.sh ./setup.sh
 . ./setup.sh --basic --xformers --flash-attn --diffoctreerast --spconv --mipgaussian --kaolin --nvdiffrast
 
 cd ../..

@@ -1,7 +1,10 @@
 conda create -y -n phystwin python=3.10
 conda activate phystwin
-conda install -n phystwin -c nvidia/label/cuda-12.1.1 cuda-toolkit -y
 
+# 2) 屏蔽用户站点，避免 ~/.local 污染
+export PYTHONNOUSERSITE=1
+unset PIP_USER   # 有的话
+conda install -n phystwin -c nvidia/label/cuda-12.1.1 cuda-toolkit -y
 # 在 (phystwin) 里：
 export CUDA_HOME="$CONDA_PREFIX"
 export PATH="$CONDA_PREFIX/bin:$PATH"

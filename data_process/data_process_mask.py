@@ -1,14 +1,14 @@
-# Process the mask data to filter out the outliers and generate the processed masks
+"""Post-process SAM2 masks using 3D consistency checks and radius outlier filtering."""
 
-import numpy as np
-import open3d as o3d
-import json
-from tqdm import tqdm
-import os
-import glob
-import cv2
-import pickle
-from argparse import ArgumentParser
+import numpy as np  # Numerical operations for point filtering and mask updates.
+import open3d as o3d  # Provides radius-based outlier removal and visualisation utilities.
+import json  # Loads semantic ID metadata saved during segmentation.
+from tqdm import tqdm  # Progress bar for long-running per-frame loops.
+import os  # Handles filesystem operations and directory creation.
+import glob  # Enumerates mask and point-cloud files to infer camera/frame counts.
+import cv2  # Reads binary mask PNGs for processing.
+import pickle  # Serialises the processed mask dictionary for reuse.
+from argparse import ArgumentParser  # CLI configuration for locating dataset assets.
 
 parser = ArgumentParser()
 parser.add_argument(
@@ -28,32 +28,54 @@ processed_masks = {}
 
 
 def exist_dir(dir):
+    """Create ``dir`` if missing so subsequent writes succeed."""
+
     if not os.path.exists(dir):
         os.makedirs(dir)
 
 
 def read_mask(mask_path):
-    # Convert the white mask into binary mask
-    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-    mask = mask > 0
+    """Load a binary mask and convert it into a boolean numpy array.
+
+    Args:
+        mask_path (str): Path to the PNG mask file exported by SAM2.
+
+    Returns:
+        np.ndarray: Boolean mask with ``True`` for foreground pixels.
+    """
+
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)  # Read mask as grayscale intensities.
+    mask = mask > 0  # Convert to boolean by treating any non-zero pixel as foreground.
     return mask
 
 
 def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
-    global processed_masks
-    processed_masks[frame_idx] = {}
+    """Combine depth-aware filtering and semantic masks to prune noisy detections.
 
-    # Load the pcd data
+    Args:
+        frame_idx (int): Frame number under consideration.
+        pcd_path (str): Directory containing per-frame fused point clouds ``{points, colors, masks}``.
+        mask_path (str): Directory holding per-camera semantic mask PNGs.
+        mask_info (Dict[int, Dict[str, Any]]): Mapping of camera index to object/controller mask IDs.
+        num_cam (int): Total number of calibrated cameras contributing to the reconstruction.
+
+    Returns:
+        Tuple[o3d.geometry.PointCloud, o3d.geometry.PointCloud]: Filtered object and controller point clouds for visual inspection.
+    """
+    global processed_masks
+    processed_masks[frame_idx] = {}  # Will store refined binary masks for each camera at the current frame.
+
+    # Load the fused RGB-D tensors: one array per camera containing 3D points, colours, and validity masks.
     data = np.load(f"{pcd_path}/{frame_idx}.npz")
-    points = data["points"]
-    colors = data["colors"]
-    masks = data["masks"]
+    points = data["points"]  # Shape: (num_cam, H, W, 3)
+    colors = data["colors"]  # Shape: (num_cam, H, W, 3)
+    masks = data["masks"]  # Shape: (num_cam, H, W), indicates valid depth samples.
 
     object_pcd = o3d.geometry.PointCloud()
     controller_pcd = o3d.geometry.PointCloud()
 
     for i in range(num_cam):
-        # Load the object mask
+        # Extract raw object points for camera ``i`` by intersecting semantic masks with valid-depth pixels.
         object_idx = mask_info[i]["object"]
         mask = read_mask(f"{mask_path}/{i}/{object_idx}/{frame_idx}.png")
         object_mask = np.logical_and(masks[i], mask)
@@ -64,7 +86,7 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
         pcd.colors = o3d.utility.Vector3dVector(object_colors)
         object_pcd += pcd
 
-        # Load the controller mask
+        # Merge all controller masks, since multiple indices may correspond to the hand/controller.
         controller_mask = np.zeros_like(masks[i])
         for controller_idx in mask_info[i]["controller"]:
             mask = read_mask(f"{mask_path}/{i}/{controller_idx}/{frame_idx}.png")
@@ -78,7 +100,7 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
         pcd.colors = o3d.utility.Vector3dVector(controller_colors)
         controller_pcd += pcd
 
-    # Apply the outlier removal
+    # Apply radius outlier removal to prune isolated points caused by depth noise.
     cl, ind = object_pcd.remove_radius_outlier(nb_points=40, radius=0.01)
     filtered_object_points = np.asarray(
         object_pcd.select_by_index(ind, invert=True).points
@@ -97,13 +119,13 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
     controller_pcd = o3d.geometry.PointCloud()
     for i in range(num_cam):
         processed_masks[frame_idx][i] = {}
-        # Load the object mask
+        # Reconstruct refined per-pixel masks by zeroing out projections of outlier 3D points.
         object_idx = mask_info[i]["object"]
         mask = read_mask(f"{mask_path}/{i}/{object_idx}/{frame_idx}.png")
         object_mask = np.logical_and(masks[i], mask)
         object_points = points[i][object_mask]
-        indices = np.nonzero(object_mask)
-        indices_list = list(zip(indices[0], indices[1]))
+        indices = np.nonzero(object_mask)  # Retrieve (row, col) indices of surviving pixels.
+        indices_list = list(zip(indices[0], indices[1]))  # Convert to a list so we can map back from flattened indices.
         # Locate all the object_points in the filtered points
         object_indices = []
         for j, point in enumerate(object_points):
@@ -115,7 +137,7 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
             object_mask[idx[0], idx[1]] = 0
         processed_masks[frame_idx][i]["object"] = object_mask
 
-        # Load the controller mask
+        # Repeat the same outlier removal process for the controller mask.
         controller_mask = np.zeros_like(masks[i])
         for controller_idx in mask_info[i]["controller"]:
             mask = read_mask(f"{mask_path}/{i}/{controller_idx}/{frame_idx}.png")
@@ -135,16 +157,15 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
             controller_mask[idx[0], idx[1]] = 0
         processed_masks[frame_idx][i]["controller"] = controller_mask
 
+        # Build Open3D point clouds representing the refined masks for interactive inspection.
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points[i][object_mask])
         pcd.colors = o3d.utility.Vector3dVector(colors[i][object_mask])
-
         object_pcd += pcd
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points[i][controller_mask])
         pcd.colors = o3d.utility.Vector3dVector(colors[i][controller_mask])
-
         controller_pcd += pcd
 
     # o3d.visualization.draw_geometries([object_pcd, controller_pcd])
@@ -153,18 +174,19 @@ def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
 
 
 if __name__ == "__main__":
-    pcd_path = f"{base_path}/{case_name}/pcd"
-    mask_path = f"{base_path}/{case_name}/mask"
+    pcd_path = f"{base_path}/{case_name}/pcd"  # Directory containing per-frame fused point clouds.
+    mask_path = f"{base_path}/{case_name}/mask"  # Directory of semantic masks exported per camera.
 
-    num_cam = len(glob.glob(f"{mask_path}/mask_info_*.json"))
-    frame_num = len(glob.glob(f"{pcd_path}/*.npz"))
-    # Load the mask metadata
+    num_cam = len(glob.glob(f"{mask_path}/mask_info_*.json"))  # Determine the number of cameras from metadata files.
+    frame_num = len(glob.glob(f"{pcd_path}/*.npz"))  # Count fused frames to know iteration length.
+    # Load the mask metadata for each camera, collecting the object ID and all controller IDs.
     mask_info = {}
     for i in range(num_cam):
         with open(f"{base_path}/{case_name}/mask/mask_info_{i}.json", "r") as f:
             data = json.load(f)
         mask_info[i] = {}
         for key, value in data.items():
+            # Each camera is expected to contain a single non-controller object; the pipeline raises if that assumption breaks.
             if value != CONTROLLER_NAME:
                 if "object" in mask_info[i]:
                     # TODO: Handle the case when there are multiple objects

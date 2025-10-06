@@ -1,14 +1,14 @@
 conda create -y -n phystwin python=3.10
 conda activate phystwin
 
-# 屏蔽用户站点，避免 ~/.local 污染
+# we want to avoid the interference from ~/.local
 export PYTHONNOUSERSITE=1
-unset PIP_USER   # 有的话
+unset PIP_USER   
+
 conda install -n phystwin -c nvidia/label/cuda-12.1.1 cuda-toolkit -y
-# 在 (phystwin) 里：
 export CUDA_HOME="$CONDA_PREFIX"
 export PATH="$CONDA_PREFIX/bin:$PATH"
-# 注意：conda 的 CUDA12 库在 $CONDA_PREFIX/lib（不是 lib64）
+
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 conda install -n phystwin -c conda-forge gcc_linux-64=12 gxx_linux-64=12 -y
 export NVCC_CCBIN="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-g++"

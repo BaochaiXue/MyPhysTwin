@@ -1,3 +1,16 @@
+# Stage 2—Differentiable Physics Core
+# Role: Implement Warp kernels for spring-force evaluation, integration, collision
+#       handling, and loss accumulation used throughout training and interactive runs.
+# Inputs: Vertex positions, spring topology, physical parameters from
+#         `InvPhyTrainerWarp`, ground-truth trajectories (`cfg`-provided tensors).
+# Outputs: Updated simulator state, accumulated losses, gradients via Warp tapes.
+# Key in-house deps: `qqtt.utils.cfg` for hyperparameters, project logger for debug,
+#                    `SpringMassSystemWarp` consumers in trainer module.
+# Side effects: Allocates Warp arrays on CUDA device, mutates shared simulator state,
+#               exposes autograd tapes for PyTorch interop; no filesystem I/O.
+# Assumptions: CUDA available, Warp initialised, input tensors sized consistently with
+#              connectivity; collision hash grids sized to avoid overflow.
+
 import torch
 from qqtt.utils import logger, cfg
 import warp as wp
@@ -11,7 +24,26 @@ if not cfg.use_graph:
 
 
 class State:
+    """Container for per-substep simulator state stored as Warp arrays.
+
+    The simulator snapshots one `State` per substep so that reverse-mode adjoints can
+    traverse the integration sequence. Each attribute mirrors a physical quantity:
+    positions, velocities before/after collisions, accumulated forces, and controller
+    poses.
+    """
+
     def __init__(self, wp_init_vertices, num_control_points):
+        """Allocate Warp buffers for vertex and controller state.
+
+        Parameters
+        ----------
+        wp_init_vertices : wp.array
+            Prototype Warp array containing the vertex layout (and dtype) used to
+            initialise the positions; `wp.zeros_like` clones its metadata.
+        num_control_points : int
+            Number of controller endpoints; controller arrays are sized accordingly and
+            created without gradients because control inputs are treated as exogenous.
+        """
         self.wp_x = wp.zeros_like(wp_init_vertices, requires_grad=True)
         self.wp_v_before_collision = wp.zeros_like(wp_init_vertices, requires_grad=True)
         self.wp_v_before_ground = wp.zeros_like(wp_init_vertices, requires_grad=True)
@@ -24,6 +56,7 @@ class State:
         self.wp_control_v = wp.zeros_like(self.wp_control_x, requires_grad=False)
 
     def clear_forces(self):
+        """Zero-out accumulated vertex forces before the next integration step."""
         self.wp_vertice_forces.zero_()
 
     # This takes more time but not necessary, will be overwritten directly
@@ -38,24 +71,51 @@ class State:
 
     @property
     def requires_grad(self):
-        """Indicates whether the state arrays have gradient computation enabled."""
+        """Indicate whether automatic differentiation is active for the state tensors."""
         return self.wp_x.requires_grad
 
 
 @wp.kernel(enable_backward=False)
 def copy_vec3(data: wp.array(dtype=wp.vec3), origin: wp.array(dtype=wp.vec3)):
+    """Element-wise copy of vec3 arrays, used when resetting Warp buffers.
+
+    Parameters
+    ----------
+    data : wp.array(dtype=wp.vec3)
+        Source vector array (`N x 3`) whose contents should be replicated.
+    origin : wp.array(dtype=wp.vec3)
+        Destination array mutated in-place to match `data`.
+    """
     tid = wp.tid()
     origin[tid] = data[tid]
 
 
 @wp.kernel(enable_backward=False)
 def copy_int(data: wp.array(dtype=wp.int32), origin: wp.array(dtype=wp.int32)):
+    """Copy integer arrays between Warp buffers without tracking gradients.
+
+    Parameters
+    ----------
+    data : wp.array(dtype=wp.int32)
+        Source integer array.
+    origin : wp.array(dtype=wp.int32)
+        Destination array receiving the copied values.
+    """
     tid = wp.tid()
     origin[tid] = data[tid]
 
 
 @wp.kernel(enable_backward=False)
 def copy_float(data: wp.array(dtype=wp.float32), origin: wp.array(dtype=wp.float32)):
+    """Copy float arrays—used for masses, rest lengths, etc.
+
+    Parameters
+    ----------
+    data : wp.array(dtype=wp.float32)
+        Source float array.
+    origin : wp.array(dtype=wp.float32)
+        Destination array updated with `data` values.
+    """
     tid = wp.tid()
     origin[tid] = data[tid]
 
@@ -68,6 +128,21 @@ def set_control_points(
     step: int,
     control_x: wp.array(dtype=wp.vec3),
 ):
+    """Linearly interpolate controller positions across substeps for smooth motion.
+
+    Parameters
+    ----------
+    num_substeps : int
+        Number of physics substeps per frame; denominator for interpolation factor.
+    original_control_point : wp.array(dtype=wp.vec3)
+        Controller positions at the previous frame.
+    target_control_point : wp.array(dtype=wp.vec3)
+        Controller goal positions at the current frame.
+    step : int
+        Index of the current substep (0-based) within the frame.
+    control_x : wp.array(dtype=wp.vec3)
+        Output buffer storing interpolated controller positions for this substep.
+    """
     # Set the control points in each substep
     tid = wp.tid()
 
@@ -93,6 +168,29 @@ def eval_springs(
     spring_Y_max: float,
     f: wp.array(dtype=wp.vec3),
 ):
+    """Evaluate Hookean spring and dashpot forces between connected vertices.
+
+    Parameters
+    ----------
+    x, v : wp.array(dtype=wp.vec3)
+        Object vertex positions/velocities (`N x 3`).
+    control_x, control_v : wp.array(dtype=wp.vec3)
+        Controller positions/velocities appended to the vertex set.
+    num_object_points : int
+        Number of entries in `x` corresponding to object vertices (excludes controllers).
+    springs : wp.array(dtype=wp.vec2i)
+        `(E, 2)` spring index pairs referencing either object or controller vertices.
+    rest_lengths : wp.array(dtype=float)
+        Rest lengths for each spring edge.
+    spring_Y : wp.array(dtype=float)
+        Log-scale Young's modulus values per spring (optimised parameter).
+    dashpot_damping : float
+        Damping coefficient applied to relative velocities along spring directions.
+    spring_Y_min, spring_Y_max : float
+        Bounds for clamping exponentiated stiffness values.
+    f : wp.array(dtype=wp.vec3)
+        Output buffer accumulating net forces per object vertex.
+    """
     tid = wp.tid()
 
     if wp.exp(spring_Y[tid]) > spring_Y_min:
@@ -147,6 +245,25 @@ def update_vel_from_force(
     reverse_factor: float,
     v_new: wp.array(dtype=wp.vec3),
 ):
+    """Integrate velocities using accumulated forces, gravity, and drag.
+
+    Parameters
+    ----------
+    v : wp.array(dtype=wp.vec3)
+        Current velocities for object vertices.
+    f : wp.array(dtype=wp.vec3)
+        Accumulated forces produced by springs/collisions.
+    masses : wp.array(dtype=wp.float32)
+        Per-vertex masses.
+    dt : float
+        Integration timestep.
+    drag_damping : float
+        Aerodynamic drag coefficient.
+    reverse_factor : float
+        Sign flip applied when simulations operate in mirrored coordinate systems.
+    v_new : wp.array(dtype=wp.vec3)
+        Output velocities after integration.
+    """
     tid = wp.tid()
 
     v0 = v[tid]
@@ -175,6 +292,32 @@ def loop(
     clamp_collide_object_elas: float,
     clamp_collide_object_fric: float,
 ):
+    """Aggregate collision impulses for point `i` against nearby contact candidates.
+
+    Parameters
+    ----------
+    i : int
+        Index of the vertex being processed.
+    collision_indices : wp.array2d(dtype=wp.int32)
+        Precomputed neighbour indices for potential collisions (shape `N x K`).
+    collision_number : wp.array(dtype=wp.int32)
+        Count of valid neighbours per vertex.
+    x, v : wp.array(dtype=wp.vec3)
+        Positions and velocities of object vertices.
+    masses : wp.array(dtype=wp.float32)
+        Per-vertex masses.
+    masks : wp.array(dtype=wp.int32)
+        Object identifiers used to avoid self-collisions.
+    collision_dist : float
+        Maximum separation for a collision to be considered.
+    clamp_collide_object_elas, clamp_collide_object_fric : float
+        Clamped restitution and friction coefficients for object-object collisions.
+
+    Returns
+    -------
+    Tuple[float, wp.vec3]
+        Count of valid collisions and the summed impulse vector.
+    """
     x1 = x[i]
     v1 = v[i]
     m1 = masses[i]
@@ -235,6 +378,23 @@ def update_potential_collision(
     collision_indices: wp.array2d(dtype=wp.int32),
     collision_number: wp.array(dtype=wp.int32),
 ):
+    """Populate per-vertex candidate lists for object-object collision checks.
+
+    Parameters
+    ----------
+    x : wp.array(dtype=wp.vec3)
+        Object vertex positions (`N x 3`).
+    masks : wp.array(dtype=wp.int32)
+        Object identifiers used to skip intra-object collisions.
+    collision_dist : float
+        Maximum search radius for potential collisions.
+    grid : wp.uint64
+        Hash-grid handle storing spatial partitioning of vertices.
+    collision_indices : wp.array2d(dtype=wp.int32)
+        Output array capturing neighbour indices for each vertex.
+    collision_number : wp.array(dtype=wp.int32)
+        Output counts of neighbours per vertex.
+    """
     tid = wp.tid()
 
     # order threads by cell
@@ -270,6 +430,24 @@ def object_collision(
     collision_number: wp.array(dtype=wp.int32),
     v_new: wp.array(dtype=wp.vec3),
 ):
+    """Resolve pairwise object collisions via impulse-based response.
+
+    Parameters
+    ----------
+    x, v : wp.array(dtype=wp.vec3)
+        Positions and velocities of object vertices.
+    masses : wp.array(dtype=wp.float32)
+        Per-vertex masses governing impulse magnitude.
+    masks : wp.array(dtype=wp.int32)
+        Object identifiers to prevent self-collisions.
+    collide_object_elas, collide_object_fric : wp.array(dtype=float)
+        Scalar buffers storing restitution and friction coefficients.
+    collision_dist : float
+        Maximum distance for collisions to be evaluated (used in the candidate set).
+    collision_indices, collision_number : see `update_potential_collision`.
+    v_new : wp.array(dtype=wp.vec3)
+        Output velocities after applying averaged impulses.
+    """
     tid = wp.tid()
 
     v1 = v[tid]
@@ -309,6 +487,21 @@ def integrate_ground_collision(
     x_new: wp.array(dtype=wp.vec3),
     v_new: wp.array(dtype=wp.vec3),
 ):
+    """Handle collisions against an infinite ground plane with restitution/friction.
+
+    Parameters
+    ----------
+    x, v : wp.array(dtype=wp.vec3)
+        Vertex positions and velocities.
+    collide_elas, collide_fric : wp.array(dtype=float)
+        Scalars storing ground restitution/friction coefficients.
+    dt : float
+        Simulation timestep.
+    reverse_factor : float
+        Sign flip applied when sim axes are reversed.
+    x_new, v_new : wp.array(dtype=wp.vec3)
+        Output buffers storing updated positions and velocities.
+    """
     tid = wp.tid()
 
     x0 = x[tid]
@@ -357,6 +550,19 @@ def compute_distances(
     gt_mask: wp.array(dtype=wp.int32),
     distances: wp.array2d(dtype=float),
 ):
+    """Compute masked pairwise distances between predicted and ground-truth points.
+
+    Parameters
+    ----------
+    pred : wp.array(dtype=wp.vec3)
+        Predicted vertex positions (`N x 3`).
+    gt : wp.array(dtype=wp.vec3)
+        Ground-truth positions (`M x 3`).
+    gt_mask : wp.array(dtype=wp.int32)
+        Visibility mask; zero entries skip the corresponding GT vertex.
+    distances : wp.array2d(dtype=float)
+        Output distance matrix (`M x N`).
+    """
     i, j = wp.tid()
     if gt_mask[i] == 1:
         dist = wp.length(gt[i] - pred[j])
@@ -370,6 +576,15 @@ def compute_neigh_indices(
     distances: wp.array2d(dtype=float),
     neigh_indices: wp.array(dtype=wp.int32),
 ):
+    """Identify the closest predicted neighbour index for each GT vertex.
+
+    Parameters
+    ----------
+    distances : wp.array2d(dtype=float)
+        Pairwise distance matrix generated by `compute_distances`.
+    neigh_indices : wp.array(dtype=wp.int32)
+        Output indices of the nearest predicted vertex per GT point.
+    """
     i = wp.tid()
     min_dist = float(1e6)
     min_index = int(-1)
@@ -390,6 +605,23 @@ def compute_chamfer_loss(
     loss_weight: float,
     chamfer_loss: wp.array(dtype=float),
 ):
+    """Accumulate weighted squared distances for the Chamfer loss term.
+
+    Parameters
+    ----------
+    pred, gt : wp.array(dtype=wp.vec3)
+        Predicted and ground-truth positions.
+    gt_mask : wp.array(dtype=wp.int32)
+        Visibility mask for ground-truth points.
+    num_valid : int
+        Count of visible GT points (normalises the loss).
+    neigh_indices : wp.array(dtype=wp.int32)
+        Mapped nearest-neighbour indices per GT point.
+    loss_weight : float
+        Multiplier applied to the Chamfer term.
+    chamfer_loss : wp.array(dtype=float)
+        Scalar accumulator storing the resulting loss.
+    """
     i = wp.tid()
     if gt_mask[i] == 1:
         min_pred = pred[neigh_indices[i]]
@@ -407,6 +639,21 @@ def compute_track_loss(
     loss_weight: float,
     track_loss: wp.array(dtype=float),
 ):
+    """Compute smooth-L1 positional error for tracked, visible points.
+
+    Parameters
+    ----------
+    pred, gt : wp.array(dtype=wp.vec3)
+        Predicted and ground-truth positions.
+    gt_mask : wp.array(dtype=wp.int32)
+        Visibility mask.
+    num_valid : int
+        Number of visible points (for averaging).
+    loss_weight : float
+        Multiplier applied to the tracking loss term.
+    track_loss : wp.array(dtype=float)
+        Scalar accumulator storing the loss value.
+    """
     i = wp.tid()
     if gt_mask[i] == 1:
         # Calculate the smooth l1 loss modifed from fvcore.nn.smooth_l1_loss
@@ -447,6 +694,15 @@ def compute_track_loss(
 
 @wp.kernel(enable_backward=False)
 def set_int(input: int, output: wp.array(dtype=wp.int32)):
+    """Write scalar integer values into Warp arrays (used for counters).
+
+    Parameters
+    ----------
+    input : int
+        Value to write into the array.
+    output : wp.array(dtype=wp.int32)
+        Destination array whose first element is set to `input`.
+    """
     output[0] = input
 
 
@@ -456,6 +712,15 @@ def update_acc(
     v2: wp.array(dtype=wp.vec3),
     prev_acc: wp.array(dtype=wp.vec3),
 ):
+    """Store previous-step accelerations for temporal smoothness regularisation.
+
+    Parameters
+    ----------
+    v1, v2 : wp.array(dtype=wp.vec3)
+        Previous and current velocities.
+    prev_acc : wp.array(dtype=wp.vec3)
+        Output buffer storing last-step acceleration (used in loss computation).
+    """
     tid = wp.tid()
     prev_acc[tid] = v2[tid] - v1[tid]
 
@@ -470,6 +735,23 @@ def compute_acc_loss(
     acc_weight: float,
     acc_loss: wp.array(dtype=wp.float32),
 ):
+    """Compute smooth-L1 penalty on acceleration changes to discourage jitter.
+
+    Parameters
+    ----------
+    v1, v2 : wp.array(dtype=wp.vec3)
+        Velocities at consecutive frames.
+    prev_acc : wp.array(dtype=wp.vec3)
+        Cached accelerations from the previous frame.
+    num_object_points : int
+        Number of vertices considered when averaging the loss.
+    acc_count : wp.array(dtype=wp.int32)
+        Flag to toggle the acceleration loss (0/1).
+    acc_weight : float
+        Multiplier for the acceleration loss term.
+    acc_loss : wp.array(dtype=wp.float32)
+        Scalar accumulator storing the loss value.
+    """
     if acc_count[0] == 1:
         # Calculate the smooth l1 loss modifed from fvcore.nn.smooth_l1_loss
         tid = wp.tid()
@@ -517,6 +799,15 @@ def compute_final_loss(
     acc_loss: wp.array(dtype=wp.float32),
     loss: wp.array(dtype=wp.float32),
 ):
+    """Combine individual loss terms into a scalar objective.
+
+    Parameters
+    ----------
+    chamfer_loss, track_loss, acc_loss : wp.array(dtype=wp.float32)
+        Individual loss accumulators.
+    loss : wp.array(dtype=wp.float32)
+        Output scalar storing the sum of all terms.
+    """
     loss[0] = chamfer_loss[0] + track_loss[0] + acc_loss[0]
 
 
@@ -527,6 +818,17 @@ def compute_simple_loss(
     num_object_points: int,
     loss: wp.array(dtype=wp.float32),
 ):
+    """Compute smooth-L1 reconstruction loss for synthetic datasets.
+
+    Parameters
+    ----------
+    pred, gt : wp.array(dtype=wp.vec3)
+        Predicted and ground-truth positions.
+    num_object_points : int
+        Number of vertices (used for averaging).
+    loss : wp.array(dtype=wp.float32)
+        Scalar accumulator storing the resulting loss.
+    """
     # Calculate the smooth l1 loss modifed from fvcore.nn.smooth_l1_loss
     tid = wp.tid()
     pred_x = pred[tid][0]
@@ -566,6 +868,7 @@ def compute_simple_loss(
 
 
 class SpringMassSystemWarp:
+    """Differentiable spring-mass simulator with collision handling and losses."""
     def __init__(
         self,
         init_vertices,
@@ -597,6 +900,52 @@ class SpringMassSystemWarp:
         self_collision=False,
         disable_backward=False,
     ):
+        """Instantiate the Warp simulator with mesh topology and physical parameters.
+
+        Parameters
+        ----------
+        init_vertices : torch.Tensor
+            `(N, 3)` initial vertex positions combining object, controller, and interior
+            points.
+        init_springs : torch.Tensor
+            `(E, 2)` integer pairs defining spring connectivity between vertices.
+        init_rest_lengths : torch.Tensor
+            `(E,)` rest distances for each spring edge.
+        init_masses : torch.Tensor
+            `(N,)` per-vertex masses used during integration.
+        dt : float
+            Simulation timestep in seconds.
+        num_substeps : int
+            Number of substeps to execute per frame for stability.
+        spring_Y : float
+            Initial Young's modulus; optimised during training.
+        collide_elas, collide_fric : float
+            Ground collision restitution and friction coefficients.
+        dashpot_damping, drag_damping : float
+            Damping coefficients for springs and air drag.
+        collide_object_elas, collide_object_fric : float
+            Object-object collision parameters.
+        init_masks : torch.Tensor, optional
+            Per-vertex object identifiers to limit collision pairs.
+        collision_dist : float
+            Distance threshold for triggering object-object collisions.
+        init_velocities : torch.Tensor, optional
+            `(N, 3)` initial velocity field.
+        num_object_points, num_surface_points, num_original_points : int
+            Bookkeeping counts to distinguish object vs. controller vertices.
+        controller_points : torch.Tensor, optional
+            `(F, C, 3)` controller trajectories for real datasets.
+        reverse_z : bool
+            Flip gravity axis to align with dataset coordinate conventions.
+        spring_Y_min, spring_Y_max : float
+            Bounds applied to exponential Young's modulus parameterisation.
+        gt_object_points, gt_object_visibilities, gt_object_motions_valid : torch.Tensor
+            Ground-truth trajectories and masks for loss computation.
+        self_collision : bool
+            If True, enable collision among all vertices (treated as unique masks).
+        disable_backward : bool
+            Skip gradient capture when building Warp graphs for inference-only mode.
+        """
         logger.info(f"[SIMULATION]: Initialize the Spring-Mass System")
         self.device = cfg.device
 
@@ -804,6 +1153,16 @@ class SpringMassSystemWarp:
             self.tape = wp.Tape()
 
     def set_controller_target(self, frame_idx, pure_inference=False):
+        """Update controller Warp buffers using pre-recorded trajectories.
+
+        Parameters
+        ----------
+        frame_idx : int
+            Index of the dataset frame to sample controller/object targets from.
+        pure_inference : bool, optional
+            When True, skip loading ground-truth object trajectories/masks (used in
+            inference-only loops).
+        """
         if self.controller_points is not None:
             # Set the controller points
             wp.launch(
@@ -852,6 +1211,15 @@ class SpringMassSystemWarp:
     def set_controller_interactive(
         self, last_controller_interactive, controller_interactive
     ):
+        """Copy interactive controller poses from UI buffers into Warp arrays.
+
+        Parameters
+        ----------
+        last_controller_interactive : torch.Tensor
+            `(C, 3)` positions from the previous frame.
+        controller_interactive : torch.Tensor
+            `(C, 3)` current target positions produced by the UI.
+        """
         # Set the controller points
         wp.launch(
             copy_vec3,
@@ -867,6 +1235,17 @@ class SpringMassSystemWarp:
         )
 
     def set_init_state(self, wp_x, wp_v, pure_inference=False):
+        """Populate the first state snapshot with positions/velocities for a rollout.
+
+        Parameters
+        ----------
+        wp_x : wp.array(dtype=wp.vec3)
+            Object vertex positions initialising the rollout.
+        wp_v : wp.array(dtype=wp.vec3)
+            Corresponding initial velocities.
+        pure_inference : bool, optional
+            Skip cloning states when running inside a captured CUDA graph for inference.
+        """
         # Detach and clone and set requires_grad=True
         assert (
             self.num_object_points == wp_x.shape[0]
@@ -901,6 +1280,14 @@ class SpringMassSystemWarp:
             )
 
     def set_acc_count(self, acc_count):
+        """Toggle acceleration regularisation based on history availability.
+
+        Parameters
+        ----------
+        acc_count : bool
+            True when previous-frame accelerations are valid and the loss should be
+            activated; False otherwise.
+        """
         if acc_count:
             input = 1
         else:
@@ -913,6 +1300,7 @@ class SpringMassSystemWarp:
         )
 
     def update_acc(self):
+        """Launch the kernel that caches accelerations for the next timestep."""
         wp.launch(
             update_acc,
             dim=self.num_object_points,
@@ -924,6 +1312,7 @@ class SpringMassSystemWarp:
         )
 
     def update_collision_graph(self):
+        """Rebuild the hash grid and neighbour lists for object-object collisions."""
         assert self.object_collision_flag
         self.collision_grid.build(self.wp_states[0].wp_x, self.collision_dist * 5.0)
         self.wp_collision_number.zero_()
@@ -940,6 +1329,7 @@ class SpringMassSystemWarp:
         )
 
     def step(self):
+        """Advance the simulator by one frame using semi-implicit integration."""
         for i in range(self.num_substeps):
             self.wp_states[i].clear_forces()
             if not self.controller_points is None:
@@ -1031,6 +1421,7 @@ class SpringMassSystemWarp:
             )
 
     def calculate_loss(self):
+        """Evaluate full loss terms (Chamfer, track, acceleration) for real data."""
         # Compute the chamfer loss
         # Precompute the distances matrix for the chamfer loss
         wp.launch(
@@ -1101,6 +1492,7 @@ class SpringMassSystemWarp:
         )
 
     def calculate_simple_loss(self):
+        """Compute simplified smooth-L1 loss for synthetic dataset benchmarks."""
         wp.launch(
             compute_simple_loss,
             dim=self.num_object_points,
@@ -1113,6 +1505,7 @@ class SpringMassSystemWarp:
         )
 
     def clear_loss(self):
+        """Zero all loss-related Warp buffers, respecting dataset modality."""
         if cfg.data_type == "real":
             self.distance_matrix.zero_()
             self.neigh_indices.zero_()
@@ -1123,6 +1516,13 @@ class SpringMassSystemWarp:
 
     # Functions used to load the parmeters
     def set_spring_Y(self, spring_Y):
+        """Copy optimised logarithmic Young's modulus into Warp parameter buffers.
+
+        Parameters
+        ----------
+        spring_Y : torch.Tensor
+            Tensor of length `n_springs` containing log-scale stiffness values.
+        """
         # assert spring_Y.shape[0] == self.n_springs
         wp.launch(
             copy_float,
@@ -1132,6 +1532,15 @@ class SpringMassSystemWarp:
         )
 
     def set_collide(self, collide_elas, collide_fric):
+        """Update ground-plane collision parameters (restitution and friction).
+
+        Parameters
+        ----------
+        collide_elas : torch.Tensor
+            Scalar tensor storing restitution coefficient.
+        collide_fric : torch.Tensor
+            Scalar tensor storing friction coefficient.
+        """
         wp.launch(
             copy_float,
             dim=1,
@@ -1146,6 +1555,15 @@ class SpringMassSystemWarp:
         )
 
     def set_collide_object(self, collide_object_elas, collide_object_fric):
+        """Write object-object collision parameters into Warp buffers.
+
+        Parameters
+        ----------
+        collide_object_elas : torch.Tensor
+            Scalar tensor containing restitution for object-object interactions.
+        collide_object_fric : torch.Tensor
+            Scalar tensor containing friction for object-object interactions.
+        """
         wp.launch(
             copy_float,
             dim=1,

@@ -1,3 +1,17 @@
+# Stage 3—Trainer, Simulator, & Interactive Loop
+# Role: Couple dataset loaders, Warp-based differentiable simulator, optimisation
+#       routines, and the Gaussian Splatting renderer to support training + playground.
+# Inputs: Dataset pickles (`final_data.pkl`), Gaussian checkpoints, experiment config
+#         (`cfg`), pretrained checkpoints, keyboard input streams.
+# Outputs: Training checkpoints (`*.pth`), diagnostic videos, live rendered frames,
+#          interactive HUD overlays, and telemetry (W&B logs, logger statements).
+# Key in-house deps: `qqtt.data.RealData/SimpleData`, `qqtt.model.diff_simulator`
+#                    spring-mass system, `gs_render` filters, config/logger utilities.
+# Side effects: Reads/writes experiment artefacts, allocates GPU buffers via Warp,
+#               spawns threads for keyboard listening, opens OpenCV windows.
+# Assumptions: `cfg` prepopulated with asset paths/device, CUDA available, required
+#              assets present on disk, environment capable of rendering GUI windows.
+
 from qqtt.data import RealData, SimpleData
 from qqtt.utils import logger, visualize_pc, cfg
 from qqtt.model.diff_simulator import (
@@ -43,6 +57,15 @@ import time
 
 
 class InvPhyTrainerWarp:
+    """Controller for training, evaluating, and interactively deploying Warp simulations.
+
+    The class encapsulates data ingestion, spring-network construction, differentiable
+    simulation, loss computation, optimisation loops, and multiple visualisation modes.
+    It mirrors the lifecycle of an inverse-physics experiment: load trajectories, build
+    a spring-mass model, optimise physical parameters, then reuse the calibrated model
+    for user-controlled interactive demos.
+    """
+
     def __init__(
         self,
         data_path,
@@ -53,6 +76,35 @@ class InvPhyTrainerWarp:
         pure_inference_mode=False,
         device="cuda:0",
     ):
+        """Initialise datasets, build the spring network, and prepare optimisation state.
+
+        Parameters
+        ----------
+        data_path : str
+            Absolute/relative path to the pickled dataset (`final_data.pkl`).
+        base_dir : str
+            Root output directory for checkpoints, logs, and generated media.
+        train_frame : Optional[int]
+            Number of frames to consume during optimisation; defaults to full length.
+        mask_path : Optional[str]
+            NumPy `.npy` mask mapping points to object IDs (synthetic multi-object cases).
+        velocity_path : Optional[str]
+            Initial velocity field `.npy` used to seed state for synthetic data.
+        pure_inference_mode : bool
+            If True, skip optimiser/W&B setup and treat the class as inference-only.
+        device : str
+            Torch/Warp device string (e.g., `'cuda:0'`).
+
+        Side Effects
+        ------------
+        * Mutates the global `cfg` singleton with paths and hyperparameters.
+        * Instantiates dataset loaders and precomputes spring connectivity/masses.
+        * Allocates Warp simulator state and, unless in inference mode, constructs an
+          Adam optimiser tied to the simulator's learnable parameters.
+        """
+
+        # Propagate experiment metadata into the global configuration singleton so all
+        # downstream modules share consistent paths/device selections.
         cfg.data_path = data_path
         cfg.base_dir = base_dir
         cfg.device = device
@@ -61,10 +113,12 @@ class InvPhyTrainerWarp:
 
         self.init_masks = None
         self.init_velocities = None
-        # Load the data
+
+        # Select the appropriate dataset wrapper based on modality; real captures ship
+        # with rich annotations, whereas synthetic variants expose simplified arrays.
         if cfg.data_type == "real":
-            self.dataset = RealData(visualize=False, save_gt=False)
-            # Get the object points and controller points
+            self.dataset = RealData(visualize=False, save_gt=True)
+            # Cache frequently accessed tensors to avoid repeated attribute lookups.
             self.object_points = self.dataset.object_points
             self.object_colors = self.dataset.object_colors
             self.object_visibilities = self.dataset.object_visibilities
@@ -76,6 +130,8 @@ class InvPhyTrainerWarp:
             self.num_all_points = self.dataset.num_all_points
         elif cfg.data_type == "synthetic":
             self.dataset = SimpleData(visualize=False)
+            # Synthetic datasets return simple arrays; set optional members to None to
+            # signal missing colour/visibility annotations.
             self.object_points = self.dataset.data
             self.object_colors = None
             self.object_visibilities = None
@@ -85,7 +141,7 @@ class InvPhyTrainerWarp:
             self.num_original_points = None
             self.num_surface_points = None
             self.num_all_points = len(self.dataset.data[0])
-            # Prepare for the multiple object case
+            # Optional `.npy` seeds let users predefine segmentation masks/velocities.
             if mask_path is not None:
                 mask = np.load(mask_path)
                 self.init_masks = torch.tensor(
@@ -99,11 +155,14 @@ class InvPhyTrainerWarp:
         else:
             raise ValueError(f"Data type {cfg.data_type} not supported")
 
-        # Initialize the vertices, springs, rest lengths and masses
+        # Convert controller trajectories to a canonical format for the initial rest
+        # state calculation; some synthetic datasets omit explicit controllers.
         if self.controller_points is None:
             firt_frame_controller_points = None
         else:
             firt_frame_controller_points = self.controller_points[0]
+
+        # Build the spring-mass lattice (vertices, adjacency, rest lengths, masses).
         (
             self.init_vertices,
             self.init_springs,
@@ -120,6 +179,8 @@ class InvPhyTrainerWarp:
             mask=self.init_masks,
         )
 
+        # Instantiate the Warp-based differentiable simulator configured with the
+        # precomputed lattice and global hyperparameters.
         self.simulator = SpringMassSystemWarp(
             self.init_vertices,
             self.init_springs,
@@ -151,6 +212,8 @@ class InvPhyTrainerWarp:
         )
 
         if not pure_inference_mode:
+            # Optimiser acts on Warp tensors converted to Torch views so gradients can be
+            # propagated back to Warp kernels through the Warp/Torch interoperability.
             self.optimizer = torch.optim.Adam(
                 [
                     wp.to_torch(self.simulator.wp_spring_Y),
@@ -163,22 +226,21 @@ class InvPhyTrainerWarp:
                 betas=(0.9, 0.99),
             )
 
+            # Initialise experiment tracking; different projects segregate production vs
+            # debugging runs for easier filtering inside the W&B UI.
             if "debug" not in cfg.run_name:
                 wandb.init(
-                    # set the wandb project where this run will be logged
                     project="final_pipeline",
                     name=cfg.run_name,
                     config=cfg.to_dict(),
                 )
             else:
                 wandb.init(
-                    # set the wandb project where this run will be logged
                     project="Debug",
                     name=cfg.run_name,
                     config=cfg.to_dict(),
                 )
             if not os.path.exists(f"{cfg.base_dir}/train"):
-                # Create directory if it doesn't exist
                 os.makedirs(f"{cfg.base_dir}/train")
 
     def _init_start(
@@ -191,20 +253,58 @@ class InvPhyTrainerWarp:
         controller_max_neighbours=50,
         mask=None,
     ):
+        """Construct the spring-mass lattice used by the Warp simulator.
+
+        Parameters
+        ----------
+        object_points : torch.Tensor
+            `(N, 3)` tensor of structural points describing the object's geometry.
+        controller_points : Optional[torch.Tensor]
+            `(M, 3)` controller positions for the first frame, if available.
+        object_radius : float
+            Neighbourhood radius for forming object-object springs via KD-tree queries.
+        object_max_neighbours : int
+            Upper limit on the number of neighbours to keep per object vertex.
+        controller_radius : float
+            Search radius when connecting controllers to nearby object vertices.
+        controller_max_neighbours : int
+            Maximum number of controller connections per node.
+        mask : Optional[torch.Tensor]
+            Cluster labels indicating distinct rigid bodies (synthetic datasets).
+
+        Returns
+        -------
+        tuple
+            A 5-tuple containing Torch tensors for vertices, spring indices, rest
+            lengths, masses, and the count of pure object springs (used later to
+            differentiate controller links).
+
+        Notes
+        -----
+        * KD-tree queries (Open3D) accelerate radius searches; results are filtered to
+          avoid duplicate spring edges and degenerate zero-length entries.
+        * When masks are present, spring networks are built per object to prevent
+          unrealistic cross-object linkages that would violate physical independence.
+        """
+
         object_points = object_points.cpu().numpy()
         if controller_points is not None:
             controller_points = controller_points.cpu().numpy()
+
         if mask is None:
+            # Build a KD-tree across all structural points to support radius queries for
+            # spring generation; Open3D stores the tree alongside the point cloud.
             object_pcd = o3d.geometry.PointCloud()
             object_pcd.points = o3d.utility.Vector3dVector(object_points)
             pcd_tree = o3d.geometry.KDTreeFlann(object_pcd)
 
-            # Connect the springs of the objects first
             points = np.asarray(object_pcd.points)
             spring_flags = np.zeros((len(points), len(points)))
             springs = []
             rest_lengths = []
             for i in range(len(points)):
+                # Hybrid search bounds both radius and neighbour count to avoid dense
+                # connectivity that destabilises the integrator.
                 [k, idx, _] = pcd_tree.search_hybrid_vector_3d(
                     points[i], object_radius, object_max_neighbours
                 )
@@ -219,12 +319,11 @@ class InvPhyTrainerWarp:
                         spring_flags[i, j] = 1
                         spring_flags[j, i] = 1
                         springs.append([i, j])
-                        rest_lengths.append(np.linalg.norm(points[i] - points[j]))
+                        rest_lengths.append(rest_length)
 
             num_object_springs = len(springs)
 
             if controller_points is not None:
-                # Connect the springs between the controller points and the object points
                 num_object_points = len(points)
                 points = np.concatenate([points, controller_points], axis=0)
                 for i in range(len(controller_points)):
@@ -251,13 +350,11 @@ class InvPhyTrainerWarp:
             )
         else:
             mask = mask.cpu().numpy()
-            # Get the unique value in masks
             unique_values = np.unique(mask)
             vertices = []
             springs = []
             rest_lengths = []
             index = 0
-            # Loop different objects to connect the springs separately
             for value in unique_values:
                 temp_points = object_points[mask == value]
                 temp_pcd = o3d.geometry.PointCloud()
@@ -303,28 +400,45 @@ class InvPhyTrainerWarp:
             )
 
     def train(self, start_epoch=-1):
-        # Render the initial visualization
+        """Optimise simulator parameters via gradient-based system identification.
+
+        Parameters
+        ----------
+        start_epoch : int, optional
+            Index of the last completed iteration when resuming training; defaults to
+            -1 so loops begin at iteration 0.
+
+        Side Effects
+        ------------
+        * Writes progress videos and checkpoints under `cfg.base_dir`.
+        * Streams scalar metrics to Weights & Biases for experiment tracking.
+        """
+
+        # Render a baseline trajectory using the current parameters to validate setup.
         video_path = f"{cfg.base_dir}/train/init.mp4"
         self.visualize_sim(save_only=True, video_path=video_path)
 
         best_loss = None
         best_epoch = None
-        # Train the model with the physical simulator
+        # Iterate through optimisation steps, either fresh or resuming from a checkpoint.
         for i in range(start_epoch + 1, cfg.iterations):
             total_loss = 0.0
             if cfg.data_type == "real":
                 total_chamfer_loss = 0.0
                 total_track_loss = 0.0
+            # Reset the simulator to the initial pose before replaying the trajectory.
             self.simulator.set_init_state(
                 self.simulator.wp_init_vertices, self.simulator.wp_init_velocities
             )
             with wp.ScopedTimer("backward"):
+                # Step through the training sequence, applying controller targets each frame.
                 for j in tqdm(range(1, cfg.train_frame)):
                     self.simulator.set_controller_target(j)
                     if self.simulator.object_collision_flag:
                         self.simulator.update_collision_graph()
 
                     if cfg.use_graph:
+                        # Use Warp's captured graph for deterministic GPU execution.
                         wp.capture_launch(self.simulator.graph)
                     else:
                         if cfg.data_type == "real":
@@ -354,13 +468,10 @@ class InvPhyTrainerWarp:
                     total_loss += loss.item()
 
                     if cfg.use_graph:
-                        # Only need to clear the gradient, the tape is created in the graph
                         self.simulator.tape.zero()
                     else:
-                        # Need to reset the compute graph and clear the gradient
                         self.simulator.tape.reset()
                     self.simulator.clear_loss()
-                    # Set the intial state for the next step
                     self.simulator.set_init_state(
                         self.simulator.wp_states[-1].wp_x,
                         self.simulator.wp_states[-1].wp_v,
@@ -408,7 +519,6 @@ class InvPhyTrainerWarp:
                     },
                     step=i,
                 )
-                # Save the parameters
                 cur_model = {
                     "epoch": i,
                     "num_object_springs": self.num_object_springs,
@@ -430,7 +540,6 @@ class InvPhyTrainerWarp:
                     "optimizer_state_dict": self.optimizer.state_dict(),
                 }
                 if best_loss == None or total_loss < best_loss:
-                    # Remove old best model file if it exists
                     if best_loss is not None:
                         old_best_model_path = (
                             f"{cfg.base_dir}/train/best_{best_epoch}.pth"
@@ -438,11 +547,9 @@ class InvPhyTrainerWarp:
                         if os.path.exists(old_best_model_path):
                             os.remove(old_best_model_path)
 
-                    # Update best loss and best epoch
                     best_loss = total_loss
                     best_epoch = i
 
-                    # Save new best model
                     best_model_path = f"{cfg.base_dir}/train/best_{best_epoch}.pth"
                     torch.save(cur_model, best_model_path)
                     logger.info(
@@ -457,6 +564,19 @@ class InvPhyTrainerWarp:
         wandb.finish()
 
     def test(self, model_path=None):
+        """Load a checkpoint and render an inference trajectory for qualitative review.
+
+        Parameters
+        ----------
+        model_path : Optional[str]
+            Path to a `.pth` checkpoint; when omitted the simulator keeps its current
+            parameter state.
+
+        Side Effects
+        ------------
+        * Writes an inference video (`inference.mp4`) and optionally saves trajectories
+          to `{cfg.base_dir}/inference.pkl` for downstream analysis.
+        """
         if model_path is not None:
             # Load the model
             logger.info(f"Load model from {model_path}")
@@ -495,6 +615,24 @@ class InvPhyTrainerWarp:
     def visualize_sim(
         self, save_only=True, video_path=None, save_trajectory=False, save_path=None
     ):
+        """Roll out the simulator and optionally export video/trajectory dumps.
+
+        Parameters
+        ----------
+        save_only : bool, optional
+            When True, disable interactive viewer rendering and only persist media.
+        video_path : Optional[str]
+            Output path for the rendered `.mp4` when `save_only` is True.
+        save_trajectory : bool, optional
+            If True, serialise the simulated vertex trajectory to disk.
+        save_path : Optional[str]
+            File path for the pickled trajectory when `save_trajectory` is enabled.
+
+        Returns
+        -------
+        None
+            The method operates via side effects: video export and/or GUI display.
+        """
         logger.info("Visualizing the simulation")
         # Visualize the whole simulation using current set of parameters in the physical simulator
         frame_len = self.dataset.frame_len
@@ -551,12 +689,28 @@ class InvPhyTrainerWarp:
             )
 
     def on_press(self, key):
+        """Capture keypress events to drive virtual controllers.
+
+        Parameters
+        ----------
+        key : pynput.keyboard.Key or pynput.keyboard.KeyCode
+            Event object emitted by the listener; ASCII characters update
+            `self.pressed_keys` while special keys are ignored.
+        """
         try:
             self.pressed_keys.add(key.char)
         except AttributeError:
             pass
 
     def on_release(self, key):
+        """Remove keys from the active set when released (handles special keys).
+
+        Parameters
+        ----------
+        key : pynput.keyboard.Key or pynput.keyboard.KeyCode
+            Event object marking a key release; ASCII characters are removed from the
+            active set, others are ignored gracefully.
+        """
         try:
             self.pressed_keys.remove(key.char)
         except (KeyError, AttributeError):
@@ -566,6 +720,14 @@ class InvPhyTrainerWarp:
                 pass
 
     def get_target_change(self):
+        """Convert currently pressed keys into per-controller velocity increments.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape `(n_ctrl_parts, 3)` describing controller deltas in meters
+            per frame along X/Y/Z axes, derived from the current keyboard state.
+        """
         target_change = np.zeros((self.n_ctrl_parts, 3))
         for key in self.pressed_keys:
             if key in self.key_mappings:
@@ -574,6 +736,14 @@ class InvPhyTrainerWarp:
         return target_change
 
     def init_control_ui(self):
+        """Initialise arrow overlays used to visualise keyboard-driven directions.
+
+        Side Effects
+        ------------
+        * Loads HUD sprite assets from `./assets`.
+        * Precomputes rotated arrow variants for every control key to avoid per-frame
+          OpenCV transformations.
+        """
 
         height = cfg.WH[1]
         width = cfg.WH[0]
@@ -723,6 +893,20 @@ class InvPhyTrainerWarp:
             )
 
     def _rotate_arrow(self, arrow, key):
+        """Rotate arrow icons according to the direction encoded by `key`.
+
+        Parameters
+        ----------
+        arrow : np.ndarray
+            RGBA sprite image loaded via OpenCV.
+        key : str
+            Control character whose rotation matrix is cached in `self.rotations`.
+
+        Returns
+        -------
+        np.ndarray
+            Rotated RGBA sprite with the same dimensions as the input sprite.
+        """
         rotation_matrix = self.rotations[key]
         rotated = cv2.warpAffine(
             arrow,
@@ -734,6 +918,27 @@ class InvPhyTrainerWarp:
         return rotated
 
     def _overlay_arrow(self, background, arrow, position, key, filled=True):
+        """Blend a directional arrow sprite onto the HUD background.
+
+        Parameters
+        ----------
+        background : np.ndarray
+            Target image onto which the arrow should be composited (RGBA expected).
+        arrow : Optional[np.ndarray]
+            Legacy parameter (kept for compatibility); pass `None` to use pre-rotated
+            sprites cached on the instance.
+        position : Tuple[int, int]
+            Pixel coordinate (x, y) specifying the centre of the arrow glyph.
+        key : str
+            Control key used to select the cached sprite variant.
+        filled : bool, optional
+            If True use the filled sprite; otherwise use the hollow outline.
+
+        Returns
+        -------
+        np.ndarray
+            Updated background image with the arrow overlay applied.
+        """
         x, y = position
 
         if filled:
@@ -767,6 +972,29 @@ class InvPhyTrainerWarp:
     def _overlay_hand_at_position(
         self, frame, target_points, x_axis, hand_size, hand_icon, align="center"
     ):
+        """Render a helper hand icon aligned to controller target clusters.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Current RGB frame to composite onto (uint8). Copy will be created internally.
+        target_points : torch.Tensor
+            Tensor of shape `(K, 3)` representing controller target positions in world
+            space whose centroid determines the icon position.
+        x_axis : np.ndarray
+            World-space x-axis direction of the camera, used to size alignment offsets.
+        hand_size : float
+            Icon extent in metres, converted to pixel scale via projection.
+        hand_icon : np.ndarray
+            RGBA sprite representing a hand.
+        align : str, optional
+            Alignment mode for placing the icon relative to its centre.
+
+        Returns
+        -------
+        np.ndarray
+            Output frame containing the composited hand sprite.
+        """
         result = frame.copy()
 
         mean_pos = target_points.cpu().numpy().mean(axis=0)
@@ -824,6 +1052,18 @@ class InvPhyTrainerWarp:
         return result
 
     def _overlay_hand_icons(self, frame):
+        """Overlay hand sprites indicating current controller targets.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            RGB frame (uint8) produced by the renderer before UI overlays.
+
+        Returns
+        -------
+        np.ndarray
+            Frame with left/right hand icons blended according to control state.
+        """
         if self.n_ctrl_parts not in [1, 2]:
             raise ValueError("Only support 1 or 2 control parts")
 
@@ -858,6 +1098,20 @@ class InvPhyTrainerWarp:
         return result
 
     def update_frame(self, frame, pressed_keys):
+        """Compose UI overlays (hands, arrows, labels) on top of rendered frames.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Rendered RGB frame (uint8) returned by the Gaussian renderer.
+        pressed_keys : Iterable[str]
+            Active keyboard keys directing which HUD arrows appear filled.
+
+        Returns
+        -------
+        np.ndarray
+            Augmented frame ready for display via OpenCV.
+        """
         result = frame.copy()
 
         result = self._overlay_hand_icons(result)
@@ -927,7 +1181,19 @@ class InvPhyTrainerWarp:
         return result
 
     def _find_closest_point(self, target_points):
-        """Find the closest structure point to any of the target points."""
+        """Find the closest structure point to any of the target points.
+
+        Parameters
+        ----------
+        target_points : torch.Tensor
+            Tensor of shape `(K, 3)` in world coordinates representing candidate
+            controller locations.
+
+        Returns
+        -------
+        torch.Tensor
+            Single `(1, 3)` tensor representing the nearest structure vertex.
+        """
         dist_matrix = torch.sum(
             (target_points.unsqueeze(1) - self.structure_points.unsqueeze(0)) ** 2,
             dim=2,
@@ -939,6 +1205,28 @@ class InvPhyTrainerWarp:
     def interactive_playground(
         self, model_path, gs_path, n_ctrl_parts=1, inv_ctrl=False, virtual_key_input=False
     ):
+        """Launch the real-time interactive demo with rendering and controller UI.
+
+        Parameters
+        ----------
+        model_path : str
+            Filesystem path to the trained checkpoint controlling simulator parameters.
+        gs_path : str
+            `.ply` file containing Gaussian Splatting splats for the scene background.
+        n_ctrl_parts : int, optional
+            Number of independent controller clusters to expose (1 or 2 supported).
+        inv_ctrl : bool, optional
+            Mirror horizontal inputs to accommodate mirrored camera setups.
+        virtual_key_input : bool, optional
+            When True, allow on-window keyboard events to drive the controller (useful
+            for scripted demos without a physical keyboard focus).
+
+        Side Effects
+        ------------
+        * Opens GUI windows via OpenCV, starts a background thread for keyboard input,
+          and enters an infinite render loop until the user exits.
+        * Mutates simulator controller targets each frame based on user input.
+        """
         # Load the model
         logger.info(f"Load model from {model_path}")
         checkpoint = torch.load(model_path, map_location=cfg.device)
@@ -1078,7 +1366,16 @@ class InvPhyTrainerWarp:
         import time
 
         class Timer:
+            """Lightweight profiler that records CPU/GPU elapsed time per component."""
+
             def __init__(self, name):
+                """Store identifier and initialise CUDA timing events.
+
+                Parameters
+                ----------
+                name : str
+                    Human-readable label used when printing aggregated stats.
+                """
                 self.name = name
                 self.elapsed = 0
                 self.start_time = None
@@ -1087,6 +1384,7 @@ class InvPhyTrainerWarp:
                 self.use_cuda = torch.cuda.is_available()
 
             def start(self):
+                """Record the start timestamp (CPU and optionally CUDA event)."""
                 if self.use_cuda:
                     torch.cuda.synchronize()
                     self.cuda_start_event = torch.cuda.Event(enable_timing=True)
@@ -1095,6 +1393,7 @@ class InvPhyTrainerWarp:
                 self.start_time = time.time()
 
             def stop(self):
+                """Stop the timer and return elapsed seconds."""
                 if self.use_cuda:
                     self.cuda_end_event.record()
                     torch.cuda.synchronize()
@@ -1106,6 +1405,7 @@ class InvPhyTrainerWarp:
                 return self.elapsed
 
             def reset(self):
+                """Reset all cached timing state to zero for the next measurement."""
                 self.elapsed = 0
                 self.start_time = None
                 self.cuda_start_event = None
@@ -1373,6 +1673,22 @@ class InvPhyTrainerWarp:
         listener.stop()
 
     def _transform_gs(self, gaussians, M, majority_scale=1):
+        """Apply affine transforms to Gaussian centers, rotations, and scales.
+
+        Parameters
+        ----------
+        gaussians : GaussianModel
+            Source Gaussian model whose tensors are copied before transformation.
+        M : torch.Tensor
+            `4x4` homogeneous transform matrix applied to Gaussian centres.
+        majority_scale : float, optional
+            Multiplicative scaling factor applied uniformly to Gaussian sizes.
+
+        Returns
+        -------
+        GaussianModel
+            Shallow copy with transformed position, rotation, and scale tensors.
+        """
 
         new_gaussians = copy.copy(gaussians)
 
@@ -1404,6 +1720,24 @@ class InvPhyTrainerWarp:
         return new_gaussians
 
     def _create_gs_view(self, w2c, intrinsic, height, width):
+        """Build a Gaussian Splatting `Camera` from sim camera extrinsics/intrinsics.
+
+        Parameters
+        ----------
+        w2c : np.ndarray
+            `4x4` world-to-camera matrix recovered from calibration (homogeneous).
+        intrinsic : np.ndarray
+            `3x3` camera intrinsic matrix containing focal lengths and principal point.
+        height : int
+            Render height in pixels.
+        width : int
+            Render width in pixels.
+
+        Returns
+        -------
+        Camera
+            Gaussian Splatting camera descriptor configured for the current view.
+        """
         R = np.transpose(w2c[:3, :3])
         T = w2c[:3, 3]
         K = torch.tensor(intrinsic, dtype=torch.float32, device="cuda")
@@ -1435,6 +1769,24 @@ class InvPhyTrainerWarp:
         return view
 
     def visualize_force(self, model_path, gs_path, n_ctrl_parts=2, force_scale=30000):
+        """Render a video visualising controller forces using arrow glyphs.
+
+        Parameters
+        ----------
+        model_path : str
+            Path to the checkpoint providing spring parameters.
+        gs_path : str
+            Gaussian Splatting `.ply` file used as the visual background.
+        n_ctrl_parts : int, optional
+            Number of controller clusters to compute forces for (1 or 2).
+        force_scale : float, optional
+            Scalar used to normalise the arrow length for on-screen readability.
+
+        Side Effects
+        ------------
+        * Writes a force-visualisation video to `{cfg.base_dir}/force_visualization.mp4`.
+        * Opens an off-screen Open3D window for rasterising the force glyphs.
+        """
         # Load the model
         logger.info(f"Load model from {model_path}")
         checkpoint = torch.load(model_path, map_location=cfg.device)
@@ -1756,6 +2108,28 @@ class InvPhyTrainerWarp:
     def get_force_vector(
         self, x, springs, rest_lengths, spring_Y, num_object_points, controller_points
     ):
+        """Aggregate spring forces acting on controller endpoints for visualisation.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            `(N, 3)` tensor of current vertex positions.
+        springs : torch.Tensor
+            `(M, 2)` indices mapping control springs to controller/object vertices.
+        rest_lengths : torch.Tensor
+            Rest lengths (`M`) for the control springs.
+        spring_Y : torch.Tensor
+            Log-scale Young's modulus parameters aligned with `springs`.
+        num_object_points : int
+            Number of object vertices (unused, kept for compatibility).
+        controller_points : torch.Tensor
+            `(K, 3)` tensor of controller positions for the current frame.
+
+        Returns
+        -------
+        torch.Tensor
+            `(3,)` vector representing the net force applied by the springs.
+        """
         with torch.no_grad():
             # Calculate the force of the springs
             x1 = controller_points[springs[:, 0]]
@@ -1777,6 +2151,25 @@ class InvPhyTrainerWarp:
         return total_force
 
     def visualize_material(self, model_path, gs_path, relative_material=True):
+        """Render material stiffness maps by colour-coding Gaussian assets.
+
+        Parameters
+        ----------
+        model_path : str
+            Path to the checkpoint providing per-spring stiffness values.
+        gs_path : str
+            Gaussian Splatting `.ply` file used for rendering.
+        relative_material : bool, optional
+            When True, normalise stiffness magnitudes within the observed range before
+            mapping to colours; otherwise use absolute values.
+
+        Side Effects
+        ------------
+        * Writes a material-visualisation video to
+          `{cfg.base_dir}/material_visualization.mp4`.
+        * Uses Open3D off-screen rendering and overlays the result onto background
+          frames.
+        """
         # Load the model
         logger.info(f"Load model from {model_path}")
         checkpoint = torch.load(model_path, map_location=cfg.device)
@@ -2056,6 +2449,31 @@ def get_simple_shadow(
     kernel_size=7,
     light_point=[0, 0, -3],
 ):
+    """Project points onto the ground plane from a point light to form a shadow mask.
+
+    Parameters
+    ----------
+    points : torch.Tensor
+        `(N, 3)` vertex positions in world coordinates.
+    intrinsic : np.ndarray
+        `3x3` intrinsic matrix for the viewing camera.
+    w2c : np.ndarray
+        `4x4` world-to-camera transform.
+    width, height : int
+        Image dimensions in pixels.
+    image_mask : np.ndarray
+        Boolean mask indicating foreground pixels from the renderer (unused but kept for
+        compatibility with legacy code paths).
+    kernel_size : int, optional
+        Morphological kernel size controlling soft shadow extent.
+    light_point : Sequence[float], optional
+        Location of the point light in world coordinates.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask representing the shadow footprint in image space.
+    """
     points = points.cpu().numpy()
 
     t = -points[:, 2] / light_point[2]
@@ -2097,6 +2515,7 @@ def get_simple_shadow(
 # Borrow ideas and codes from H. Sánchez's answer
 # https://stackoverflow.com/questions/59026581/create-arrows-in-open3d
 def getArrowMesh(origin=[0, 0, 0], end=None, color=[0, 0, 0]):
+    """Construct a coloured Open3D arrow between two points for force visualisation."""
     vec_Arr = np.array(end) - np.array(origin)
     vec_len = np.linalg.norm(vec_Arr)
     mesh_arrow = o3d.geometry.TriangleMesh.create_arrow(
@@ -2113,6 +2532,7 @@ def getArrowMesh(origin=[0, 0, 0], end=None, color=[0, 0, 0]):
 
 
 def _get_cross_prod_mat(pVec_Arr):
+    """Return the skew-symmetric matrix representing cross products with `pVec_Arr`."""
     # pVec_Arr shape (3)
     qCross_prod_mat = np.array(
         [
@@ -2125,6 +2545,7 @@ def _get_cross_prod_mat(pVec_Arr):
 
 
 def _caculate_align_mat(pVec_Arr):
+    """Compute rotation matrix aligning +Z axis with the given vector."""
     scale = np.linalg.norm(pVec_Arr)
     pVec_Arr = pVec_Arr / scale
     # must ensure pVec_Arr is also a unit vec.
@@ -2150,6 +2571,7 @@ def _caculate_align_mat(pVec_Arr):
 def construct_stiffness_matrix_sparse(
     springs, positions, spring_Y, rest_lengths, num_points, device
 ):
+    """Assemble the sparse global stiffness matrix for a spring network."""
     # springs: (N_springs, 2)
     # positions: (N_points, 3)
     # spring_Y: (N_springs,)

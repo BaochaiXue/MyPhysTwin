@@ -9,6 +9,31 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+"""Rendering entry points bridging Gaussian Splatting assets with Warp simulator views.
+
+Role in pipeline:
+    * Exposes `render` helpers that choose between gsplat and 3D Gaussian rasterizers
+      during interactive simulation. Handles normal rendering and background blending.
+
+Inputs & outputs:
+    * Consumes camera parameters (`viewpoint_camera`), Gaussian models, renderer
+      configs (`pipe`), and returns dictionaries containing RGB, depth, normals, and
+      visibility masks for use in the playground UI.
+
+Dependencies:
+    * Wraps `diff_gaussian_rasterization`, `gsplat.rasterization`, and project utility
+      functions (`eval_sh`). Requires CUDA-enabled PyTorch and the custom GaussianModel
+      data container.
+
+Filesystem & side effects:
+    * No filesystem interactions; all work occurs in GPU memory.
+
+Assumptions & preconditions:
+    * Input Gaussians must be pre-trained and resident on the correct CUDA device. The
+      calling code must pass background colours allocated on GPU. When gsplat is used,
+      the installation must include the necessary custom operators.
+"""
+
 import torch
 import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
@@ -19,6 +44,7 @@ from gsplat import rasterization
 
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, use_gsplat=True, antialiased=False, separate_sh = False, use_trained_exp=False):
+    """Dispatch rendering to either gsplat or the original 3D Gaussian rasterizer."""
     if use_gsplat:
         return render_gsplat(viewpoint_camera, pc, pipe, bg_color, scaling_modifier, override_color, antialiased)
     else:
@@ -28,11 +54,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 # This is code is adapted from ChatSim background gaussians model: 
 # https://github.com/yifanlu0227/ChatSim/blob/main/chatsim/background/gaussian-splatting/gaussian_renderer/gsplat_renderer.py
 def render_gsplat(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, antialiased = True, render_normals = False):
-    """
-    Render the scene. 
-    
-    Background tensor (bg_color) must be on GPU!
-    """
+    """Render a Gaussian scene using fast gsplat rasterization with optional normals."""
     # Set up rasterization configuration
     if viewpoint_camera.K is not None:
         # print("====== Use camera K ======")
@@ -169,11 +191,7 @@ def render_gsplat(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.T
 
 
 def render_3dgs(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, separate_sh = False, override_color = None, use_trained_exp=False):
-    """
-    Render the scene. 
-    
-    Background tensor (bg_color) must be on GPU!
-    """
+    """Render using the original 3D Gaussian Splatting rasterizer with SH decoding."""
  
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0

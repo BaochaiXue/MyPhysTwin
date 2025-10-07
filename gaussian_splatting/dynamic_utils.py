@@ -1,8 +1,33 @@
+"""Dynamic Gaussian utility functions for motion interpolation within the playground.
+
+Role in pipeline:
+    * Provides quaternion/matrix conversion, KNN weighting, and motion interpolation
+      helpers used to animate Gaussian splats in sync with simulator outputs.
+
+Inputs & outputs:
+    * Functions consume PyTorch tensors representing bones, point samples, and motion
+      trajectories; they return rotation matrices, quaternions, weights, and warped
+      point clouds.
+
+Dependencies:
+    * Uses PyTorch for linear algebra, Kornia for quaternion math, and optionally
+      custom device kernels available via PyTorch.
+
+Filesystem & side effects:
+    * Purely computational; no file I/O.
+
+Assumptions & preconditions:
+    * All tensors are expected to reside on the same device (typically CUDA) and be of
+      compatible shapes. Quaternion inputs should already be normalised or will be
+      normalised internally.
+"""
+
 import torch
 import kornia
 
 
 def quat2mat(q):
+    """Convert quaternions `(w, x, y, z)` into 3x3 rotation matrices."""
     norm = torch.sqrt(q[:, 0] * q[:, 0] + q[:, 1] * q[:, 1] + q[:, 2] * q[:, 2] + q[:, 3] * q[:, 3])
     q = q / norm[:, None]
     rot = torch.zeros((q.shape[0], 3, 3)).to(q.device)
@@ -23,6 +48,7 @@ def quat2mat(q):
 
 
 def mat2quat(rot):
+    """Convert 3x3 rotation matrices back into quaternions `(w, x, y, z)`."""
     t = torch.clamp(rot[:, 0, 0] + rot[:, 1, 1] + rot[:, 2, 2], min=-1)
     q = torch.zeros((rot.shape[0], 4)).to(rot.device)
 
@@ -65,6 +91,27 @@ def mat2quat(rot):
     return q
 
 def interpolate_motions(bones, motions, relations, xyz, rot=None, quat=None, weights=None, device='cuda', step='n/a'):
+    """Blend bone motions to propagate deformations onto Gaussian centers.
+
+    Parameters
+    ----------
+    bones : torch.Tensor
+        `(B, 3)` positions of bone anchors.
+    motions : torch.Tensor
+        `(B, 3)` bone displacements to apply.
+    relations : torch.Tensor
+        `(B, K)` adjacency indices describing neighbouring bones for rigid fitting.
+    xyz : torch.Tensor
+        `(N, 3)` Gaussian positions to warp.
+    rot, quat : torch.Tensor, optional
+        Precomputed rotations / quaternions for bones to reuse.
+    weights : torch.Tensor, optional
+        `(N, B)` blending weights between bones and points. Computed if absent.
+    device : str
+        Target device for intermediate tensors.
+    step : str
+        Debug label used in logging when numerical issues arise.
+    """
     # bones: (n_bones, 3)
     # motions: (n_bones, 3)
     # relations: (n_bones, k)
@@ -217,6 +264,7 @@ def interpolate_motions(bones, motions, relations, xyz, rot=None, quat=None, wei
 
 
 def create_relation_matrix(points, K=5):
+    """Construct a KNN adjacency matrix over bones for interpolation."""
     """
     Create an NxN relation matrix where each row has 1s for the top K closest neighbors and 0s elsewhere.
     
@@ -246,6 +294,7 @@ def create_relation_matrix(points, K=5):
 
 
 def get_topk_indices(points, K=5):
+    """Return indices of the K nearest neighbours for each query point."""
     """
     Compute the indices of the top K closest neighbors for each point.
 
@@ -266,6 +315,7 @@ def get_topk_indices(points, K=5):
 
 
 def knn_weights(bones, pts, K=5):
+    """Compute inverse-distance weights between points and their K nearest bones."""
     dist = torch.norm(pts[:, None] - bones, dim=-1)  # (n_pts, n_bones)
     _, indices = torch.topk(dist, K, dim=-1, largest=False)
     bones_selected = bones[indices]  # (N, k, 3)
@@ -280,6 +330,7 @@ def knn_weights(bones, pts, K=5):
 
 
 def calc_weights_vals_from_indices(bones, pts, indices):
+    """Convert neighbour indices into normalised inverse-distance blending weights."""
     # bones: (n_bones, 3)
     # pts: (n_particles, 3)
     # indices: (n_particles, k) indices of k nearest bones per particle
@@ -293,6 +344,7 @@ def calc_weights_vals_from_indices(bones, pts, indices):
 
 
 def knn_weights_sparse(bones, pts, K=5):
+    """Return sparse COO weights for efficient GPU warping of many Gaussians."""
     dist = torch.norm(pts[:, None].cpu() - bones.cpu(), dim=-1)  # (n_pts, n_bones)
     weights_vals, indices = torch.topk(dist, K, dim=-1, largest=False)
     weights_vals = weights_vals.to(pts.device)
@@ -303,6 +355,7 @@ def knn_weights_sparse(bones, pts, K=5):
     return weights_vals, indices
 
 def interpolate_motions_speedup(bones, motions, relations, xyz, rot=None, quat=None, weights=None, weights_indices=None, device='cuda', step='n/a'):
+    """Optimised variant of `interpolate_motions` using sparse weights for throughput."""
     # bones: (n_bones, 3) bone positions
     # motions: (n_bones, 3) bone motions/displacements
     # relations: (n_bones, k_adj) bone adjacency relationships - which bones are connected to each other

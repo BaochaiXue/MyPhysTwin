@@ -9,6 +9,34 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+"""Gaussian radiance field container tailored for the interactive playground pipeline.
+
+Role in pipeline:
+    * Stores and manipulates 3D Gaussian primitives reconstructed by Gaussian
+      Splatting training, exposing differentiable tensors to the renderer.
+    * Supports densification, pruning, and serialization that the playground uses to
+      stream scene assets into the simulator loop.
+
+Inputs & outputs:
+    * Loads `.ply` files produced by training (`load_ply`) and optional JSON exposure
+      metadata; outputs processed `GaussianModel` state to renderers and writes new
+      `.ply` checkpoints when pruning/densifying (`save_ply`).
+
+Dependencies:
+    * Heavy reliance on PyTorch tensor ops, custom CUDA kernels (`simple_knn`),
+      numpy, and utility helpers from `gaussian_splatting.utils`. The class is
+      orchestrated by `InvPhyTrainerWarp` and `Scene` objects during interactive runs.
+
+Filesystem & side effects:
+    * Reads/writes PLY files, JSON configs, and can create directories via `mkdir_p`.
+      Keeps optimizer state dictionaries for checkpointing.
+
+Assumptions & preconditions:
+    * The caller must initialise CUDA (PyTorch device) and ensure the Gaussian
+      checkpoint directories follow the expected naming; exposure metadata is optional
+      but, when provided, must match the view naming used during training.
+"""
+
 import torch
 import numpy as np
 from ..utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
@@ -28,14 +56,22 @@ except:
     pass
 
 class GaussianModel:
+    """Maintain learnable Gaussian primitives for rendering and densification.
+
+    The class bundles point locations, spherical-harmonic coefficients, anisotropic
+    scaling, rotations, and opacities that describe a 3D Gaussian radiance field. It
+    also persists optimizer state so training can be resumed seamlessly.
+    """
 
     def setup_functions(self):
+        """Initialise activation functions for parameter decoding and covariance build."""
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
+            """Compose covariance matrix from scaling vectors and quaternion rotations."""
             L = build_scaling_rotation(scaling_modifier * scaling, rotation)
             actual_covariance = L @ L.transpose(1, 2)
             symm = strip_symmetric(actual_covariance)
             return symm
-        
+
         self.scaling_activation = torch.exp
         self.scaling_inverse_activation = torch.log
 
@@ -49,6 +85,17 @@ class GaussianModel:
         self.isotropic = False
 
     def __init__(self, sh_degree, optimizer_type="default"):
+        """Construct an empty Gaussian field with the requested SH basis size.
+
+        Parameters
+        ----------
+        sh_degree : int
+            Maximum spherical-harmonic degree retained per Gaussian (controls colour
+            expressiveness).
+        optimizer_type : str, optional
+            Choose between the default Adam-like optimizer and the sparse variant when
+            available (`SparseGaussianAdam`).
+        """
         self.active_sh_degree = 0
         self.optimizer_type = optimizer_type
         self.max_sh_degree = sh_degree  
@@ -67,6 +114,7 @@ class GaussianModel:
         self.setup_functions()
 
     def capture(self):
+        """Snapshot all learnable tensors and optimizer state for checkpointing."""
         return (
             self.active_sh_degree,
             self._xyz,
@@ -83,6 +131,7 @@ class GaussianModel:
         )
     
     def restore(self, model_args, training_args):
+        """Reload tensors/optimizer state from a previously captured checkpoint."""
         (self.active_sh_degree, 
         self._xyz, 
         self._features_dc, 
@@ -102,6 +151,7 @@ class GaussianModel:
 
     @property
     def get_scaling(self):
+        """Return decoded anisotropic scaling per Gaussian (broadcast for isotropic)."""
         if self.isotropic:
             return self.scaling_activation(self._scaling).repeat(1, 3)
         else:
@@ -109,44 +159,54 @@ class GaussianModel:
     
     @property
     def get_rotation(self):
+        """Return unit quaternions describing Gaussian principal axes."""
         return self.rotation_activation(self._rotation)
     
     @property
     def get_xyz(self):
+        """Expose world-space Gaussian centroids (N, 3)."""
         return self._xyz
     
     @property
     def get_features(self):
+        """Concatenate DC and higher-order SH coefficients for colour decoding."""
         features_dc = self._features_dc
         features_rest = self._features_rest
         return torch.cat((features_dc, features_rest), dim=1)
     
     @property
     def get_features_dc(self):
+        """Return the spherical-harmonic DC term (per Gaussian colour bias)."""
         return self._features_dc
     
     @property
     def get_features_rest(self):
+        """Return higher-order SH coefficients capturing view-dependent colour."""
         return self._features_rest
     
     @property
     def get_opacity(self):
+        """Decode the sigmoid-parameterised opacity (transparency) per Gaussian."""
         return self.opacity_activation(self._opacity)
     
     @property
     def get_exposure(self):
+        """Retrieve per-view exposure correction parameters."""
         return self._exposure
 
     def get_exposure_from_name(self, image_name):
+        """Map render viewpoint identifiers to stored exposure scalars."""
         if self.pretrained_exposures is None:
             return self._exposure[self.exposure_mapping[image_name]]
         else:
             return self.pretrained_exposures[image_name]
     
     def get_covariance(self, scaling_modifier = 1):
+        """Construct symmetric covariance matrices for each Gaussian."""
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
     
     def get_normal(self, dir_pp_normalized=None):
+        """Predict surface normals by aligning minimal-variance axes to view direction."""
         normal_axis = self.get_minimum_axis
         normal_axis, positive = flip_align_view(normal_axis, dir_pp_normalized)
         normal = normal_axis / normal_axis.norm(dim=1, keepdim=True) # (N, 3)
@@ -154,13 +214,16 @@ class GaussianModel:
     
     @property
     def get_minimum_axis(self):
+        """Return the eigenvector corresponding to minimal Gaussian variance."""
         return get_minimum_axis(self.get_scaling, self.get_rotation)
 
     def oneupSHdegree(self):
+        """Increase the active SH degree by one while respecting the predefined max."""
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
     def create_from_pcd(self, pcd : BasicPointCloud, cam_infos : int, spatial_lr_scale : float):
+        """Initialise Gaussian tensors from a basic point cloud reconstruction."""
         self.spatial_lr_scale = spatial_lr_scale
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
@@ -193,6 +256,7 @@ class GaussianModel:
         self._exposure = nn.Parameter(exposure.requires_grad_(True))
 
     def training_setup(self, training_args):
+        """Attach optimizers and accumulators for density control before training."""
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -228,7 +292,7 @@ class GaussianModel:
                                                         max_steps=training_args.iterations)
 
     def update_learning_rate(self, iteration):
-        ''' Learning rate scheduling per step '''
+        """Update positional/exposure learning rates according to exponential schedulers."""
         if self.pretrained_exposures is None:
             for param_group in self.exposure_optimizer.param_groups:
                 param_group['lr'] = self.exposure_scheduler_args(iteration)
@@ -240,6 +304,7 @@ class GaussianModel:
                 return lr
 
     def construct_list_of_attributes(self):
+        """Enumerate PLY header attribute names aligning with tensor layout."""
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
         # All channels except the 3 DC
         for i in range(self._features_dc.shape[1]*self._features_dc.shape[2]):
@@ -254,6 +319,7 @@ class GaussianModel:
         return l
 
     def save_ply(self, path):
+        """Serialise current Gaussian parameters to a PLY file on disk."""
         mkdir_p(os.path.dirname(path))
 
         xyz = self._xyz.detach().cpu().numpy()
@@ -273,11 +339,13 @@ class GaussianModel:
         PlyData([el]).write(path)
 
     def reset_opacity(self):
+        """Clamp opacities to a low floor to encourage densification restarts."""
         opacities_new = self.inverse_opacity_activation(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.01))
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
         self._opacity = optimizable_tensors["opacity"]
 
     def load_ply(self, path, use_train_test_exp = False):
+        """Populate tensors from a saved PLY and optional exposure JSON files."""
         plydata = PlyData.read(path)
         if use_train_test_exp:
             exposure_file = os.path.join(os.path.dirname(path), os.pardir, os.pardir, "exposure.json")
@@ -331,6 +399,7 @@ class GaussianModel:
         self.active_sh_degree = self.max_sh_degree
 
     def replace_tensor_to_optimizer(self, tensor, name):
+        """Swap optimizer parameter tensors while keeping momentum buffers in sync."""
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
             if group["name"] == name:
@@ -346,6 +415,7 @@ class GaussianModel:
         return optimizable_tensors
 
     def _prune_optimizer(self, mask):
+        """Shrink optimizer state tensors so they match pruned Gaussian subsets."""
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
             stored_state = self.optimizer.state.get(group['params'][0], None)
@@ -364,6 +434,7 @@ class GaussianModel:
         return optimizable_tensors
 
     def prune_points(self, mask):
+        """Physically drop Gaussians flagged by `mask` and resize bookkeeping tensors."""
         valid_points_mask = ~mask
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
 
@@ -381,6 +452,7 @@ class GaussianModel:
         self.tmp_radii = self.tmp_radii[valid_points_mask]
 
     def cat_tensors_to_optimizer(self, tensors_dict):
+        """Append new Gaussian tensors to optimizer groups while preserving momentum."""
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
             assert len(group["params"]) == 1
@@ -408,6 +480,7 @@ class GaussianModel:
         return optimizable_tensors
 
     def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_tmp_radii):
+        """Integrate densification outputs into the model state and reset caches."""
         d = {"xyz": new_xyz,
         "f_dc": new_features_dc,
         "f_rest": new_features_rest,
@@ -429,6 +502,7 @@ class GaussianModel:
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
+        """Spawn additional Gaussians by splitting those with high gradient magnitudes."""
         n_init_points = self.get_xyz.shape[0]
         # Extract points that satisfy the gradient condition
         padded_grad = torch.zeros((n_init_points), device="cuda")
@@ -464,6 +538,7 @@ class GaussianModel:
         self.prune_points(prune_filter)
 
     def densify_and_clone(self, grads, grad_threshold, scene_extent):
+        """Duplicate high-gradient Gaussians to thicken coverage without splitting."""
         # Extract points that satisfy the gradient condition
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
@@ -481,6 +556,7 @@ class GaussianModel:
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_tmp_radii)
 
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, radii):
+        """Remove Gaussians with low support or oversized footprint after densification."""
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
@@ -504,6 +580,7 @@ class GaussianModel:
     #     self.denom[update_filter] += 1
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter, width, height, use_gsplat=True, use_absgrad=False):
+        """Accumulate per-pixel gradient statistics guiding future densification steps."""
         if use_gsplat:
             # https://github.com/liruilong940607/gaussian-splatting/commit/258123ab8f8d52038da862c936bd413dc0b32e4d
             # grad = viewspace_point_tensor.grad.squeeze(0) # [N, 2]

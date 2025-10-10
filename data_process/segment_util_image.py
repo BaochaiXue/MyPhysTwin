@@ -5,6 +5,8 @@ GroundingDINO given a natural-language prompt, then feeding those boxes into SAM
 mask. The result is saved as an RGBA image where the alpha channel retains only the prompted object.
 """
 
+import sys  # Allows graceful early exits when detections fail repeatedly.
+
 import cv2  # Provides image I/O and manipulation utilities for mask generation.
 import torch  # Supplies tensor operations and device detection for model inference.
 import numpy as np  # Handles numerical calculations such as bounding-box transforms.
@@ -82,7 +84,10 @@ grounding_model = load_model(
 
 # setup the input image and text prompt for SAM 2 and Grounding DINO
 # VERY important: text queries need to be lowercased + end with a dot
-text = TEXT_PROMPT  # Use the provided prompt directly (caller responsible for formatting guidance).
+text = TEXT_PROMPT.strip().lower()
+if not text.endswith("."):
+    text = f"{text}."
+# Use the normalised prompt directly in the first attempt; retries may reuse it with relaxed thresholds.
 
 image_source, image = load_image(
     img_path
@@ -92,13 +97,40 @@ sam2_predictor.set_image(
     image_source
 )  # Provide the RGB frame to SAM2 so future predictions reuse shared features.
 
-boxes, confidences, labels = predict(
-    model=grounding_model,
-    image=image,
-    caption=text,
-    box_threshold=BOX_THRESHOLD,
-    text_threshold=TEXT_THRESHOLD,
-)  # Run GroundingDINO to obtain candidate bounding boxes for the described object.
+attempt_settings = [
+    (text, BOX_THRESHOLD, TEXT_THRESHOLD),
+    (text, BOX_THRESHOLD, TEXT_THRESHOLD),
+    (text, BOX_THRESHOLD, TEXT_THRESHOLD),
+    (text, BOX_THRESHOLD * 0.95, TEXT_THRESHOLD * 0.95),
+    (text, BOX_THRESHOLD * 0.9, TEXT_THRESHOLD * 0.9),
+]
+
+boxes = None
+confidences = None
+labels = None
+for attempt_idx, (attempt_prompt, box_th, text_th) in enumerate(attempt_settings):
+    boxes, confidences, labels = predict(
+        model=grounding_model,
+        image=image,
+        caption=attempt_prompt,
+        box_threshold=box_th,
+        text_threshold=text_th,
+    )
+    if boxes.shape[0] > 0:
+        print(
+            f"[GroundingDINO Debug] detection succeeded on attempt {attempt_idx + 1} "
+            f"(box_threshold={box_th:.2f}, text_threshold={text_th:.2f})."
+        )
+        break
+else:
+    print(
+        f"[GroundingDINO Warning] No detections found for prompt '{text}'. "
+        "Writing an empty RGBA mask."
+    )
+    h, w, _ = image_source.shape
+    empty_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    cv2.imwrite(output_path, empty_rgba)
+    sys.exit(0)
 
 # process the box prompt for SAM 2
 h, w, _ = image_source.shape  # Grab original resolution for scaling bounding boxes.
@@ -118,6 +150,26 @@ print(
     f"[GroundingDINO Debug] boxes shape={input_boxes.shape}, confidences={conf_values}"
 )  # Provide visibility into detection outcomes for troubleshooting.
 
+if input_boxes.shape[0] > 1:
+    # Keep only the highest-confidence detection to avoid batch-size mismatches inside SAM2.
+    if hasattr(confidences, "detach"):
+        conf_array = confidences.detach().cpu().numpy()
+    else:
+        conf_array = np.asarray(conf_values, dtype=np.float32)
+    best_idx = int(np.argmax(conf_array))
+    input_boxes = input_boxes[best_idx : best_idx + 1]
+    if hasattr(confidences, "__getitem__"):
+        confidences = confidences[best_idx : best_idx + 1]
+    else:
+        confidences = [conf_values[best_idx]]
+    labels = [labels[best_idx]]
+else:
+    input_boxes = input_boxes[:1]
+    if hasattr(confidences, "__getitem__"):
+        confidences = confidences[:1]
+    else:
+        confidences = conf_values[:1]
+    labels = labels[:1]
 
 # FIXME: figure how does this influence the G-DINO model
 torch.autocast(

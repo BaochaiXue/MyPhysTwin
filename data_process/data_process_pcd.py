@@ -7,7 +7,9 @@ import pickle  # Loads calibration matrices (camera-to-world transforms).
 import cv2  # Reads RGB/depth images from disk.
 from tqdm import tqdm  # Provides progress bars for long-running frame loops.
 import os  # Used for filesystem inspection and directory creation.
-from argparse import ArgumentParser  # Parses command-line arguments specifying dataset paths.
+from argparse import (
+    ArgumentParser,
+)  # Parses command-line arguments specifying dataset paths.
 
 # Configure CLI options so the script can be reused standalone or via orchestrators.
 parser = ArgumentParser()
@@ -16,7 +18,9 @@ parser.add_argument(
     type=str,
     required=True,
 )  # Root directory that stores all capture cases.
-parser.add_argument("--case_name", type=str, required=True)  # Specific case folder to convert into point clouds.
+parser.add_argument(
+    "--case_name", type=str, required=True
+)  # Specific case folder to convert into point clouds.
 args = parser.parse_args()  # Parse arguments immediately for convenience.
 
 base_path = args.base_path  # Dataset root provided by the caller.
@@ -57,26 +61,63 @@ def getCamera(
     """
     # Return the camera and its corresponding frustum framework
     if coordinate:
-        camera = o3d.geometry.TriangleMesh.create_coordinate_frame(size=scale)  # Build a local axis-aligned frame for the camera origin.
-        camera.transform(transformation)  # Move the coordinate frame into the camera pose.
+        camera = o3d.geometry.TriangleMesh.create_coordinate_frame(
+            size=scale
+        )  # Build a local axis-aligned frame for the camera origin.
+        camera.transform(
+            transformation
+        )  # Move the coordinate frame into the camera pose.
     else:
-        camera = o3d.geometry.TriangleMesh()  # Fallback dummy mesh when coordinate frame is undesired.
+        camera = (
+            o3d.geometry.TriangleMesh()
+        )  # Fallback dummy mesh when coordinate frame is undesired.
     # Add origin and four corner points in image plane
     points = []  # Collect vertices describing the frustum wireframe.
-    camera_origin = np.array([0, 0, 0, 1])  # Homogeneous origin used for transformation.
-    points.append(np.dot(transformation, camera_origin)[0:3])  # Transform origin into world coordinates and record.
+    camera_origin = np.array(
+        [0, 0, 0, 1]
+    )  # Homogeneous origin used for transformation.
+    points.append(
+        np.dot(transformation, camera_origin)[0:3]
+    )  # Transform origin into world coordinates and record.
     # Calculate the four points for of the image plane
-    magnitude = (cy**2 + cx**2 + fx**2) ** 0.5  # Normalising factor derived from intrinsics.
+    magnitude = (
+        cy**2 + cx**2 + fx**2
+    ) ** 0.5  # Normalising factor derived from intrinsics.
     if z_flip:
-        plane_points = [[-cx, -cy, fx], [-cx, cy, fx], [cx, -cy, fx], [cx, cy, fx]]  # Flip image plane orientation when needed.
+        plane_points = [
+            [-cx, -cy, fx],
+            [-cx, cy, fx],
+            [cx, -cy, fx],
+            [cx, cy, fx],
+        ]  # Flip image plane orientation when needed.
     else:
-        plane_points = [[-cx, -cy, -fx], [-cx, cy, -fx], [cx, -cy, -fx], [cx, cy, -fx]]  # Default image plane coordinates.
+        plane_points = [
+            [-cx, -cy, -fx],
+            [-cx, cy, -fx],
+            [cx, -cy, -fx],
+            [cx, cy, -fx],
+        ]  # Default image plane coordinates.
     for point in plane_points:
-        point = list(np.array(point) / magnitude * scale)  # Normalise and scale the plane point.
-        temp_point = np.array(point + [1])  # Promote to homogeneous coordinates for transformation.
-        points.append(np.dot(transformation, temp_point)[0:3])  # Transform each frustum corner into world space.
+        point = list(
+            np.array(point) / magnitude * scale
+        )  # Normalise and scale the plane point.
+        temp_point = np.array(
+            point + [1]
+        )  # Promote to homogeneous coordinates for transformation.
+        points.append(
+            np.dot(transformation, temp_point)[0:3]
+        )  # Transform each frustum corner into world space.
     # Draw the camera framework
-    lines = [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 4], [1, 3], [3, 4]]  # Indices describing frustum edges.
+    lines = [
+        [0, 1],
+        [0, 2],
+        [0, 3],
+        [0, 4],
+        [1, 2],
+        [2, 4],
+        [1, 3],
+        [3, 4],
+    ]  # Indices describing frustum edges.
     line_set = o3d.geometry.LineSet(
         points=o3d.utility.Vector3dVector(points),
         lines=o3d.utility.Vector2iVector(lines),
@@ -86,8 +127,12 @@ def getCamera(
 
     if shoot:
         shoot_points = []  # Extra geometry showing the viewing ray when requested.
-        shoot_points.append(np.dot(transformation, camera_origin)[0:3])  # Start point at the camera origin.
-        shoot_points.append(np.dot(transformation, np.array([0, 0, -length, 1]))[0:3])  # End point along camera forward direction.
+        shoot_points.append(
+            np.dot(transformation, camera_origin)[0:3]
+        )  # Start point at the camera origin.
+        shoot_points.append(
+            np.dot(transformation, np.array([0, 0, -length, 1]))[0:3]
+        )  # End point along camera forward direction.
         shoot_lines = [[0, 1]]  # Single line segment connecting the two points.
         shoot_line_set = o3d.geometry.LineSet(
             points=o3d.utility.Vector3dVector(shoot_points),
@@ -114,9 +159,15 @@ def getPcdFromDepth(depth, intrinsic):
     x = x.reshape(-1)  # Flatten into 1D array for vectorised math.
     y = y.reshape(-1)  # Flatten into 1D array for vectorised math.
     depth = depth.reshape(-1)  # Flatten depth to align with pixel indices.
-    points = np.stack([x, y, np.ones_like(x)], axis=1)  # Assemble homogeneous pixel coordinates.
-    points = points * depth[:, None]  # Scale by depth to obtain un-normalised camera rays.
-    points = points @ np.linalg.inv(intrinsic).T  # Apply inverse intrinsics to reach metric camera coordinates.
+    points = np.stack(
+        [x, y, np.ones_like(x)], axis=1
+    )  # Assemble homogeneous pixel coordinates.
+    points = (
+        points * depth[:, None]
+    )  # Scale by depth to obtain un-normalised camera rays.
+    points = (
+        points @ np.linalg.inv(intrinsic).T
+    )  # Apply inverse intrinsics to reach metric camera coordinates.
     points = points.reshape(H, W, 3)  # Reshape back to image grid layout.
     return points  # Return XYZ coordinates for every pixel.
 
@@ -137,25 +188,45 @@ def get_pcd_from_data(path, frame_idx, num_cam, intrinsics, c2ws):
     total_points = []  # Accumulate world-space point volumes for each camera.
     total_colors = []  # Collect corresponding RGB values.
     total_masks = []  # Store per-pixel validity masks.
-    for i in range(num_cam):  # Iterate over all cameras contributing to the fused cloud.
-        color = cv2.imread(f"{path}/color/{i}/{frame_idx}.png")  # Read the per-camera colour image.
-        color = cv2.cvtColor(color, cv2.COLOR_BGR2RGB)  # Convert OpenCV's BGR ordering back to RGB.
-        color = color.astype(np.float32) / 255.0  # Normalise colours to [0, 1] floats for Open3D compatibility.
-        depth = np.load(f"{path}/depth/{i}/{frame_idx}.npy") / 1000.0  # Load the depth map and convert millimetres to metres.
+    for i in range(
+        num_cam
+    ):  # Iterate over all cameras contributing to the fused cloud.
+        color = cv2.imread(
+            f"{path}/color/{i}/{frame_idx}.png"
+        )  # Read the per-camera colour image.
+        color = cv2.cvtColor(
+            color, cv2.COLOR_BGR2RGB
+        )  # Convert OpenCV's BGR ordering back to RGB.
+        color = (
+            color.astype(np.float32) / 255.0
+        )  # Normalise colours to [0, 1] floats for Open3D compatibility.
+        depth = (
+            np.load(f"{path}/depth/{i}/{frame_idx}.npy") / 1000.0
+        )  # Load the depth map and convert millimetres to metres.
 
         points = getPcdFromDepth(
             depth,
             intrinsic=intrinsics[i],
         )  # Reconstruct camera-space XYZ coordinates per pixel.
-        masks = np.logical_and(points[:, :, 2] > 0.2, points[:, :, 2] < 1.5)  # Keep depths within a plausible range to remove sensor noise.
-        points_flat = points.reshape(-1, 3)  # Flatten for homogeneous transform application.
+        masks = np.logical_and(
+            points[:, :, 2] > 0.2, points[:, :, 2] < 1.5
+        )  # Keep depths within a plausible range to remove sensor noise.
+        points_flat = points.reshape(
+            -1, 3
+        )  # Flatten for homogeneous transform application.
         # Transform points to world coordinates using homogeneous transformation
         homogeneous_points = np.hstack(
             (points_flat, np.ones((points_flat.shape[0], 1)))
         )  # Append ones so 4x4 matrices can be applied.
-        points_world = np.dot(c2ws[i], homogeneous_points.T).T[:, :3]  # Transform into world space using camera-to-world matrix.
-        points_final = points_world.reshape(points.shape)  # Reshape back into image grid layout.
-        total_points.append(points_final)  # Store world-space coordinates for this camera.
+        points_world = np.dot(c2ws[i], homogeneous_points.T).T[
+            :, :3
+        ]  # Transform into world space using camera-to-world matrix.
+        points_final = points_world.reshape(
+            points.shape
+        )  # Reshape back into image grid layout.
+        total_points.append(
+            points_final
+        )  # Store world-space coordinates for this camera.
         total_colors.append(color)  # Store corresponding RGB values.
         total_masks.append(masks)  # Track which pixels were considered valid.
     # pcd = o3d.geometry.PointCloud()
@@ -178,14 +249,22 @@ def get_pcd_from_data(path, frame_idx, num_cam, intrinsics, c2ws):
     # mask = np.logical_and(mask, visualize_points[:, 2] < 0.2)
     # visualize_points = visualize_points[mask]
     # visualize_colors = visualize_colors[mask]
-        
+
     # pcd.points = o3d.utility.Vector3dVector(np.concatenate(visualize_points).reshape(-1, 3))
     # pcd.colors = o3d.utility.Vector3dVector(np.concatenate(visualize_colors).reshape(-1, 3))
     # o3d.visualization.draw_geometries([pcd])
-    total_points = np.asarray(total_points)  # Convert lists to numpy arrays for compact storage.
-    total_colors = np.asarray(total_colors)  # Convert to array form to simplify downstream indexing.
+    total_points = np.asarray(
+        total_points
+    )  # Convert lists to numpy arrays for compact storage.
+    total_colors = np.asarray(
+        total_colors
+    )  # Convert to array form to simplify downstream indexing.
     total_masks = np.asarray(total_masks)  # Convert mask list to boolean array.
-    return total_points, total_colors, total_masks  # Provide the per-camera tensors to the caller.
+    return (
+        total_points,
+        total_colors,
+        total_masks,
+    )  # Provide the per-camera tensors to the caller.
 
 
 def exist_dir(dir):
@@ -203,16 +282,24 @@ def exist_dir(dir):
 
 if __name__ == "__main__":
     with open(f"{base_path}/{case_name}/metadata.json", "r") as f:
-        data = json.load(f)  # Load dataset metadata including intrinsics and frame count.
-    intrinsics = np.array(data["intrinsics"])  # Convert intrinsics list into numpy array for numeric operations.
+        data = json.load(
+            f
+        )  # Load dataset metadata including intrinsics and frame count.
+    intrinsics = np.array(
+        data["intrinsics"]
+    )  # Convert intrinsics list into numpy array for numeric operations.
     WH = data["WH"]  # Unused image shape info, retained for completeness/debugging.
     frame_num = data["frame_num"]  # Total number of frames captured per camera.
     print(data["serial_numbers"])  # Display camera serials to confirm ordering.
 
     num_cam = len(intrinsics)  # Determine how many cameras were calibrated.
-    c2ws = pickle.load(open(f"{base_path}/{case_name}/calibrate.pkl", "rb"))  # Load camera-to-world transforms from disk.
+    c2ws = pickle.load(
+        open(f"{base_path}/{case_name}/calibrate.pkl", "rb")
+    )  # Load camera-to-world transforms from disk.
 
-    exist_dir(f"{base_path}/{case_name}/pcd")  # Ensure output directory for point clouds exists.
+    exist_dir(
+        f"{base_path}/{case_name}/pcd"
+    )  # Ensure output directory for point clouds exists.
 
     cameras = []
     # Visualize the cameras
@@ -233,7 +320,9 @@ if __name__ == "__main__":
     for camera in cameras:
         vis.add_geometry(camera)  # Add each camera geometry to the scene for context.
 
-    coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.5)  # Global coordinate frame for reference.
+    coordinate = o3d.geometry.TriangleMesh.create_coordinate_frame(
+        size=0.5
+    )  # Global coordinate frame for reference.
     vis.add_geometry(coordinate)  # Visualise the world axes alongside the cameras.
 
     pcd = None  # Will hold the point cloud geometry reused across frames.
@@ -243,7 +332,9 @@ if __name__ == "__main__":
         )  # Fetch per-camera world-space points, colours, and masks for the current frame.
 
         if i == 0:
-            pcd = o3d.geometry.PointCloud()  # Create a fresh point cloud geometry for the first frame.
+            pcd = (
+                o3d.geometry.PointCloud()
+            )  # Create a fresh point cloud geometry for the first frame.
             pcd.points = o3d.utility.Vector3dVector(
                 points.reshape(-1, 3)[masks.reshape(-1)]
             )  # Flatten camera dimension and filter by mask before assigning XYZ points.
@@ -252,10 +343,18 @@ if __name__ == "__main__":
             )  # Apply matching colours to the same valid points.
             vis.add_geometry(pcd)  # Insert the merged cloud into the visualiser.
             # Adjust the viewpoint
-            view_control = vis.get_view_control()  # Access camera control interface to orient the scene.
-            view_control.set_front([1, 0, -2])  # Configure camera orientation for a clear initial view.
-            view_control.set_up([0, 0, -1])  # Set upward direction relative to world axes.
-            view_control.set_zoom(1)  # Zoom to a comfortable level for the dataset scale.
+            view_control = (
+                vis.get_view_control()
+            )  # Access camera control interface to orient the scene.
+            view_control.set_front(
+                [1, 0, -2]
+            )  # Configure camera orientation for a clear initial view.
+            view_control.set_up(
+                [0, 0, -1]
+            )  # Set upward direction relative to world axes.
+            view_control.set_zoom(
+                1
+            )  # Zoom to a comfortable level for the dataset scale.
         else:
             pcd.points = o3d.utility.Vector3dVector(
                 points.reshape(-1, 3)[masks.reshape(-1)]

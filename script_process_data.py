@@ -3,11 +3,13 @@
 import os  # Used to launch subprocesses and inspect dataset directories.
 import csv  # Parses the configuration file listing cases, categories, and shape-prior flags.
 
-base_path = "./data/different_types"  # Root directory where all captured cases are stored.
+# Allow overriding defaults so we can re-use the script with alternate datasets (e.g. data_ext).
+base_path = os.environ.get("DATA_BASE_PATH", "./data/different_types")
+config_path = os.environ.get("DATA_CONFIG_PATH", "data_config.csv")
 
 os.system("rm -f timer.log")  # Reset the timing log so each batch run starts with a clean slate.
 
-with open("data_config.csv", newline="", encoding="utf-8") as csvfile:
+with open(config_path, newline="", encoding="utf-8") as csvfile:
     reader = csv.reader(csvfile)
     for row in reader:
         case_name = row[0]

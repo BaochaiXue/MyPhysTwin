@@ -1,8 +1,8 @@
 import os
 import glob
 
-base_path = "./data/different_types"
-output_path = "./data/different_types_human_mask"
+base_path = os.environ.get("DATA_BASE_PATH", "./data/different_types")
+output_path = os.environ.get("HUMAN_MASK_OUTPUT", "./data/different_types_human_mask")
 
 def existDir(dir_path):
     if not os.path.exists(dir_path):

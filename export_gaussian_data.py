@@ -5,8 +5,10 @@ import pickle
 import numpy as np
 import open3d as o3d
 
-base_path = "./data/different_types"
-output_path = "./data/gaussian_data"
+# Allow overriding via environment variables so the same script can target data_ext etc.
+base_path = os.environ.get("DATA_BASE_PATH", "./data/different_types")
+output_path = os.environ.get("GAUSSIAN_DATA_OUTPUT", "./data/gaussian_data")
+config_path = os.environ.get("DATA_CONFIG_PATH", "data_config.csv")
 CONTROLLER_NAME = "hand"
 
 
@@ -17,7 +19,7 @@ def existDir(dir_path):
 
 existDir(output_path)
 
-with open("data_config.csv", newline="", encoding="utf-8") as csvfile:
+with open(config_path, newline="", encoding="utf-8") as csvfile:
     reader = csv.reader(csvfile)
     for row in reader:
         case_name = row[0]

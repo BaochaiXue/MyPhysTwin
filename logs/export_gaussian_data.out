@@ -1,0 +1,74 @@
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.6411423683166504]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.5859012007713318]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.5468423962593079]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.4250596761703491]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.5181225538253784]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.42316022515296936]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.5687557458877563]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.3683158755302429]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 4 (box_threshold=0.33, text_threshold=0.24).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.3489230275154114]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.8399873971939087]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(2, 4), confidences=[0.4623571038246155, 0.4257330894470215]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(2, 4), confidences=[0.4403088688850403, 0.36794209480285645]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.8143023252487183]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(2, 4), confidences=[0.5459504127502441, 0.3684638738632202]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.5081267356872559]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.8001301884651184]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.6401457190513611]
+Detected 1 objects
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.6223834753036499]
+Detected 1 objects
+Processing feng_rope_v6_0001!!!!!!!!!!!!!!!
+Processing feng_sloth_0907_0001_long_003!!!!!!!!!!!!!!!

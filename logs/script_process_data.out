@@ -1,0 +1,87 @@
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=837)
+[[283.07965 177.48398 614.3892  253.68408]
+ [210.70055 196.42749 309.11478 282.59875]
+ [272.91815  52.57617 343.30054 110.05946]]
+['twine', 'hand', 'hand']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=837)
+[[256.50507 219.79718 402.76544 324.24548]
+ [368.15515 303.30536 458.03455 406.6411 ]]
+['twine', 'hand']
+Processing feng_rope_v6_0001
+Processing feng_rope_v6_0001 camera 0
+Processing feng_rope_v6_0001 camera 1
+Processing feng_rope_v6_0001 camera 2
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.6476275324821472]
+Detected 1 objects
+[SPARSE] Backend: spconv, Attention: flash_attn
+[SPARSE][CONV] spconv algo: native
+[ATTENTION] Using backend: flash_attn
+Before postprocess: 24130 vertices, 48252 faces
+After decimate: 1210 vertices, 2412 faces
+INFO- Loaded 1185 vertices and 2366 faces.
+
+0% done Found 46 invisible faces
+Dual graph: 3618 edges
+Mincut solved, start checking the cut
+Removed 46 faces by mincut
+After remove invisible faces: 1185 vertices, 2366 faces
+
+Processing 0th camera
+Video saved to ./data_ext/different_types/feng_rope_v6_0001/cotracker/0.mp4
+Processing 1th camera
+Video saved to ./data_ext/different_types/feng_rope_v6_0001/cotracker/1.mp4
+Processing 2th camera
+Video saved to ./data_ext/different_types/feng_rope_v6_0001/cotracker/2.mp4
+['213622251190', '213522250683', '318122300893']
+Reprojection Error: 10.763627052307129
+Rescale: 0.6142049285213411
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=132)
+[[222.06902 178.67398 554.8056  397.0316 ]
+ [523.47876 225.93655 635.0387  291.1335 ]]
+['sloth', 'hand']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=132)
+[[371.765   310.0033  578.2127  429.97125]
+ [343.0632  414.81113 455.95035 479.30252]]
+['sloth', 'hand']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=132)
+[[213.8078  297.27267 434.58954 427.67618]
+ [273.70062 290.79407 323.98578 328.0921 ]]
+['sloth', 'hand']
+Processing feng_sloth_0907_0001_long_003
+Processing feng_sloth_0907_0001_long_003 camera 0
+Processing feng_sloth_0907_0001_long_003 camera 1
+Processing feng_sloth_0907_0001_long_003 camera 2
+final text_encoder_type: bert-base-uncased
+[GroundingDINO Debug] detection succeeded on attempt 1 (box_threshold=0.35, text_threshold=0.25).
+[GroundingDINO Debug] boxes shape=(1, 4), confidences=[0.8355802297592163]
+Detected 1 objects
+[SPARSE] Backend: spconv, Attention: flash_attn
+[SPARSE][CONV] spconv algo: native
+[ATTENTION] Using backend: flash_attn
+Before postprocess: 134926 vertices, 269832 faces
+After decimate: 6747 vertices, 13490 faces
+INFO- Loaded 4182 vertices and 8356 faces.
+
+0% done 100% done Found 4604 invisible faces
+Dual graph: 20235 edges
+Mincut solved, start checking the cut
+Removed 5134 faces by mincut
+After remove invisible faces: 4182 vertices, 8360 faces
+
+Processing 0th camera
+Video saved to ./data_ext/different_types/feng_sloth_0907_0001_long_003/cotracker/0.mp4
+Processing 1th camera
+Video saved to ./data_ext/different_types/feng_sloth_0907_0001_long_003/cotracker/1.mp4
+Processing 2th camera
+Video saved to ./data_ext/different_types/feng_sloth_0907_0001_long_003/cotracker/2.mp4
+['213622251190', '318122300492', '318122300893']
+Controller Point Number: 30
+Reprojection Error: 10.653420448303223
+Rescale: 0.49479045365673124

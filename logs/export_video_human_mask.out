@@ -1,0 +1,34 @@
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=132)
+[[222.60455 178.85715 553.49335 396.61172]
+ [523.5216  179.61989 847.0786  291.34125]]
+['human', 'human']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=132)
+[[6.2591370e+02 9.5254959e+01 7.4624097e+02 2.6222778e+02]
+ [7.0980835e-01 3.6249753e+02 4.5574649e+02 4.7892123e+02]]
+['human', 'human']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=132)
+[[2.7286304e+02 2.9869080e-01 4.3311163e+02 3.2878833e+02]]
+['human']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=837)
+[[182.94833     0.4028473 395.5311    282.34668  ]]
+['human']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=837)
+[[3.9399341e+02 8.6380005e-02 5.3724921e+02 2.1045590e+02]]
+['human']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=837)
+[[  0.8725281  66.99246   457.8458    478.5034   ]]
+['human']
+Processing feng_sloth_0907_0001_long_003!!!!!!!!!!!!!!!
+Processing feng_sloth_0907_0001_long_003 camera 0
+Processing feng_sloth_0907_0001_long_003 camera 1
+Processing feng_sloth_0907_0001_long_003 camera 2
+Processing feng_rope_v6_0001!!!!!!!!!!!!!!!
+Processing feng_rope_v6_0001 camera 0
+Processing feng_rope_v6_0001 camera 1
+Processing feng_rope_v6_0001 camera 2

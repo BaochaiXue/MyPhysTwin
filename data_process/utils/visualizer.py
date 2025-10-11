@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
@@ -5,6 +7,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+from pathlib import Path
+from typing import Optional, Sequence, Tuple, Union
+
 import numpy as np
 import imageio
 import torch
@@ -16,19 +21,26 @@ import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
 
 
-def read_video_from_path(path):
+def read_video_from_path(path: Union[str, Path]) -> Optional[np.ndarray]:
     try:
         reader = imageio.get_reader(path)
     except Exception as e:
         print("Error opening video file: ", e)
         return None
-    frames = []
-    for i, im in enumerate(reader):
+    frames: list[np.ndarray] = []
+    for _, im in enumerate(reader):
         frames.append(np.array(im))
     return np.stack(frames)
 
 
-def draw_circle(rgb, coord, radius, color=(255, 0, 0), visible=True, color_alpha=None):
+def draw_circle(
+    rgb: Image.Image,
+    coord: Tuple[int, int],
+    radius: int,
+    color: Sequence[int] = (255, 0, 0),
+    visible: bool = True,
+    color_alpha: Optional[int] = None,
+) -> Image.Image:
     # Create a draw object
     draw = ImageDraw.Draw(rgb)
     # Calculate the bounding box of the circle
@@ -45,7 +57,13 @@ def draw_circle(rgb, coord, radius, color=(255, 0, 0), visible=True, color_alpha
     return rgb
 
 
-def draw_line(rgb, coord_y, coord_x, color, linewidth):
+def draw_line(
+    rgb: Image.Image,
+    coord_y: Tuple[int, int],
+    coord_x: Tuple[int, int],
+    color: Sequence[int],
+    linewidth: int,
+) -> Image.Image:
     draw = ImageDraw.Draw(rgb)
     draw.line(
         (coord_y[0], coord_y[1], coord_x[0], coord_x[1]),
@@ -55,7 +73,9 @@ def draw_line(rgb, coord_y, coord_x, color, linewidth):
     return rgb
 
 
-def add_weighted(rgb, alpha, original, beta, gamma):
+def add_weighted(
+    rgb: np.ndarray, alpha: float, original: np.ndarray, beta: float, gamma: float
+) -> np.ndarray:
     return (rgb * alpha + original * beta + gamma).astype("uint8")
 
 
@@ -98,7 +118,7 @@ class Visualizer:
         save_video: bool = True,
         compensate_for_camera_motion: bool = False,
         opacity: float = 1.0,
-    ):
+    ) -> torch.Tensor:
         if compensate_for_camera_motion:
             assert segm_mask is not None
         if segm_mask is not None:
@@ -133,7 +153,13 @@ class Visualizer:
             self.save_video(res_video, filename=filename, writer=writer, step=step)
         return res_video
 
-    def save_video(self, video, filename, writer=None, step=0):
+    def save_video(
+        self,
+        video: torch.Tensor,
+        filename: str,
+        writer=None,
+        step: int = 0,
+    ) -> None:
         if writer is not None:
             writer.add_video(
                 filename,
@@ -170,7 +196,7 @@ class Visualizer:
         query_frame=0,
         compensate_for_camera_motion=False,
         color_alpha: int = 255,
-    ):
+    ) -> torch.Tensor:
         B, T, C, H, W = video.shape
         _, _, N, D = tracks.shape
 
@@ -298,7 +324,7 @@ class Visualizer:
         tracks: np.ndarray,  # T x 2
         vector_colors: np.ndarray,
         alpha: float = 0.5,
-    ):
+    ) -> np.ndarray:
         T, N, _ = tracks.shape
         rgb = Image.fromarray(np.uint8(rgb))
         for s in range(T - 1):
@@ -331,7 +357,7 @@ class Visualizer:
         self,
         rgb: np.ndarray,  # H x W x 3,
         gt_tracks: np.ndarray,  # T x 2
-    ):
+    ) -> np.ndarray:
         T, N, _ = gt_tracks.shape
         color = np.array((211, 0, 0))
         rgb = Image.fromarray(np.uint8(rgb))

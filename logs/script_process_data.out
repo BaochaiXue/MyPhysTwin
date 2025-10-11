@@ -6,6 +6,11 @@ VideoInfo(width=848, height=480, fps=30, total_frames=837)
 ['twine', 'hand', 'hand']
 final text_encoder_type: bert-base-uncased
 VideoInfo(width=848, height=480, fps=30, total_frames=837)
+[[504.03952 219.72322 574.08026 269.3578 ]
+ [509.9532  252.64027 542.4505  479.0407 ]]
+['hand', 'twine']
+final text_encoder_type: bert-base-uncased
+VideoInfo(width=848, height=480, fps=30, total_frames=837)
 [[256.50507 219.79718 402.76544 324.24548]
  [368.15515 303.30536 458.03455 406.6411 ]]
 ['twine', 'hand']
@@ -20,7 +25,7 @@ Detected 1 objects
 [SPARSE] Backend: spconv, Attention: flash_attn
 [SPARSE][CONV] spconv algo: native
 [ATTENTION] Using backend: flash_attn
-Before postprocess: 24130 vertices, 48252 faces
+Before postprocess: 24126 vertices, 48244 faces
 After decimate: 1210 vertices, 2412 faces
 INFO- Loaded 1185 vertices and 2366 faces.
 
@@ -37,6 +42,9 @@ Video saved to ./data_ext/different_types/feng_rope_v6_0001/cotracker/1.mp4
 Processing 2th camera
 Video saved to ./data_ext/different_types/feng_rope_v6_0001/cotracker/2.mp4
 ['213622251190', '213522250683', '318122300893']
+[Track Debug] surviving controller trajectories: 7
+[WARN] Only 7 controller tracks survived filtering; skipping FPS downsampling to 30 and keeping all survivors.
+Controller Point Number: 7
 Reprojection Error: 10.763627052307129
 Rescale: 0.6142049285213411
 final text_encoder_type: bert-base-uncased
@@ -65,15 +73,15 @@ Detected 1 objects
 [SPARSE] Backend: spconv, Attention: flash_attn
 [SPARSE][CONV] spconv algo: native
 [ATTENTION] Using backend: flash_attn
-Before postprocess: 134926 vertices, 269832 faces
+Before postprocess: 134924 vertices, 269828 faces
 After decimate: 6747 vertices, 13490 faces
-INFO- Loaded 4182 vertices and 8356 faces.
+INFO- Loaded 4191 vertices and 8374 faces.
 
-0% done 100% done Found 4604 invisible faces
+0% done 100% done Found 4585 invisible faces
 Dual graph: 20235 edges
 Mincut solved, start checking the cut
-Removed 5134 faces by mincut
-After remove invisible faces: 4182 vertices, 8360 faces
+Removed 5116 faces by mincut
+After remove invisible faces: 4191 vertices, 8378 faces
 
 Processing 0th camera
 Video saved to ./data_ext/different_types/feng_sloth_0907_0001_long_003/cotracker/0.mp4
@@ -82,6 +90,7 @@ Video saved to ./data_ext/different_types/feng_sloth_0907_0001_long_003/cotracke
 Processing 2th camera
 Video saved to ./data_ext/different_types/feng_sloth_0907_0001_long_003/cotracker/2.mp4
 ['213622251190', '318122300492', '318122300893']
+[Track Debug] surviving controller trajectories: 142
 Controller Point Number: 30
 Reprojection Error: 10.653420448303223
 Rescale: 0.49479045365673124

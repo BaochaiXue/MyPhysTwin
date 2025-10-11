@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 """Post-process dense tracks to remove outliers and extract stable controller anchor points."""
+
+from typing import Dict, Iterable, MutableMapping, Sequence, Tuple
 
 import numpy as np  # Numerical backbone for array manipulation and vectorised filtering.
 import open3d as o3d  # Offers point-cloud processing, KD-tree queries, and visualisation utilities.
@@ -24,12 +28,24 @@ args = parser.parse_args()
 
 base_path = args.base_path  # Dataset root path provided by user.
 case_name = args.case_name  # Case identifier under the dataset root.
-IGNORE_COTRACKER_TRAJECTORIES_TOO_LESS: bool = (
-    os.getenv("IGNORE_COTRACKER_TRAJECTORIES_TOO_LESS", "0") == "1"
-)  # Environment variable to skip cases with too few Co-Tracker trajectories.
 
 
-def exist_dir(dir):
+def _env_flag(*names: str) -> bool:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None:
+            if value.strip().lower() in {"1", "true", "yes"}:
+                return True
+            return False
+    return False
+
+
+IGNORE_COTRACKER_TRAJECTORIES_TOO_FEW: bool = _env_flag(
+    "IGNORE_COTRACKER_TRAJECTORIES_TOO_FEW", "IGNORE_COTRACKER_TRAJECTORIES_TOO_LESS"
+)  # Environment flag to bypass strict controller-track count checks.
+
+
+def exist_dir(dir: str) -> None:
     """Create ``dir`` if missing.
 
     Args:
@@ -44,7 +60,11 @@ def exist_dir(dir):
         os.makedirs(dir)  # Recursively create path so downstream writes succeed.
 
 
-def getSphereMesh(center, radius=0.1, color=[0, 0, 0]):
+def getSphereMesh(
+    center: Sequence[float],
+    radius: float = 0.1,
+    color: Sequence[float] = (0, 0, 0),
+) -> o3d.geometry.TriangleMesh:
     """Create an Open3D sphere mesh at the specified centre for visualising controller points.
 
     Args:
@@ -63,7 +83,13 @@ def getSphereMesh(center, radius=0.1, color=[0, 0, 0]):
 
 
 # Based on the valid mask, filter out the bad tracking data
-def filter_track(track_path, pcd_path, mask_path, frame_num, num_cam):
+def filter_track(
+    track_path: str,
+    pcd_path: str,
+    mask_path: str,
+    frame_num: int,
+    num_cam: int,
+) -> Dict[str, np.ndarray]:
     """Load raw Co-Tracker outputs and prune trajectories inconsistent with processed object/controller masks.
 
     Args:
@@ -261,7 +287,9 @@ def filter_track(track_path, pcd_path, mask_path, frame_num, num_cam):
     return track_data  # Provide filtered data for further refinement.
 
 
-def filter_motion(track_data, neighbor_dist=0.01):
+def filter_motion(
+    track_data: MutableMapping[str, np.ndarray], neighbor_dist: float = 0.01
+) -> MutableMapping[str, np.ndarray]:
     """Suppress trajectories whose motion deviates significantly from local neighbours to reduce jitter/noise.
 
     Args:
@@ -528,7 +556,9 @@ def filter_motion(track_data, neighbor_dist=0.01):
     return track_data  # Return updated track_data dictionary for subsequent processing.
 
 
-def get_final_track_data(track_data, controller_threhsold=0.01):
+def get_final_track_data(
+    track_data: MutableMapping[str, np.ndarray], controller_threhsold: float = 0.01
+) -> MutableMapping[str, np.ndarray]:
     """Select a stable subset of controller points and keep object track metadata for downstream use.
 
     Args:
@@ -556,23 +586,49 @@ def get_final_track_data(track_data, controller_threhsold=0.01):
         "controller_mask"
     ]  # Boolean mask selecting controller tracks valid across sequence.
 
+    masked_indices = np.where(mask)[0]
+    max_valid_idx = controller_points.shape[1] - 1
+    if masked_indices.size == 0:
+        raise ValueError(
+            "No controller trajectories remain after visibility filtering; "
+            "cannot proceed with farthest-point sampling."
+        )
+    if masked_indices.max() > max_valid_idx:
+        print(
+            "[WARN] controller_mask length exceeds available controller trajectories; "
+            "clipping indices to valid range."
+        )
+        masked_indices = masked_indices[masked_indices <= max_valid_idx]
+        if masked_indices.size == 0:
+            raise ValueError(
+                "All controller_mask indices were out of range; inspect upstream filtering."
+            )
+
     new_controller_points = controller_points[
-        :, np.where(mask)[0], :
+        :, masked_indices, :
     ]  # Keep only globally valid controller tracks.
     surviving = new_controller_points.shape[1]
     print(f"[Track Debug] surviving controller trajectories: {surviving}")
-    if IGNORE_COTRACKER_TRAJECTORIES_TOO_LESS and surviving < 30:
-        print(
-            f"[Track Debug] Ignore case with too less cotracker trajectories: {surviving}"
-        )
-    else:
-        assert surviving >= 30, (
-            f"Expected at least 30 controller trajectories after filtering, "
-            f"got {surviving}. Consider relaxing thresholds or improving masks."
-        )  # Sanity-check that enough points survived for farthest-point sampling.
+
+    if surviving < 30:
+        if IGNORE_COTRACKER_TRAJECTORIES_TOO_FEW:
+            print(
+                f"[WARN] Only {surviving} controller tracks survived filtering; "
+                "skipping FPS downsampling to 30 and keeping all survivors."
+            )
+        else:
+            raise AssertionError(
+                f"Expected at least 30 controller trajectories after filtering, "
+                f"got {surviving}. Consider relaxing thresholds or improving masks, "
+                "or set IGNORE_COTRACKER_TRAJECTORIES_TOO_FEW=1 (or legacy "
+                "IGNORE_COTRACKER_TRAJECTORIES_TOO_LESS=1) to override."
+            )
+
+    target_count = min(30, surviving)
+
     # Do farthest point sampling on the valid controller points to select the final controller points
     valid_indices = np.arange(
-        len(new_controller_points[0])
+        new_controller_points.shape[1]
     )  # Candidate indices among surviving tracks.
     points_map = {}  # Map from 3D coordinate tuples to index for quick lookup.
     sample_points = []  # List of points used for FPS input geometry.
@@ -581,23 +637,23 @@ def get_final_track_data(track_data, controller_threhsold=0.01):
             i  # Remember which index owns each point.
         )
         sample_points.append(new_controller_points[0, i])  # Collect points for FPS.
-    sample_points = np.array(
-        sample_points
-    )  # Convert to numpy array for Open3D operations.
-    sample_pcd = (
-        o3d.geometry.PointCloud()
-    )  # Build Open3D point cloud from candidate points.
-    sample_pcd.points = o3d.utility.Vector3dVector(sample_points)
-    fps_pcd = sample_pcd.farthest_point_down_sample(
-        30
-    )  # Select 30 representative controller points using FPS.
-    final_indices = (
-        []
-    )  # Indices of points selected by FPS in the original array ordering.
-    for point in fps_pcd.points:
-        final_indices.append(
-            points_map[tuple(point)]
-        )  # Map each sampled point back to its index.
+    sample_points = np.array(sample_points)  # Convert to numpy array for Open3D operations.
+
+    if target_count == surviving:
+        final_indices = valid_indices.tolist()
+    else:
+        sample_pcd = (
+            o3d.geometry.PointCloud()
+        )  # Build Open3D point cloud from candidate points.
+        sample_pcd.points = o3d.utility.Vector3dVector(sample_points)
+        fps_pcd = sample_pcd.farthest_point_down_sample(
+            target_count
+        )  # Select representative controller points using FPS.
+        final_indices = []
+        for point in fps_pcd.points:
+            final_indices.append(
+                points_map[tuple(point)]
+            )  # Map each sampled point back to its index.
 
     print(
         f"Controller Point Number: {len(final_indices)}"
@@ -637,7 +693,7 @@ def get_final_track_data(track_data, controller_threhsold=0.01):
     return track_data  # Pass reduced dataset onward.
 
 
-def visualize_track(track_data):
+def visualize_track(track_data: Dict[str, np.ndarray]) -> None:
     """Play back filtered object/controller trajectories in Open3D for qualitative validation.
 
     Args:

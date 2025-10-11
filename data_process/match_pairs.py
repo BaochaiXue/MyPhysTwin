@@ -44,9 +44,12 @@
 # --------------------------------------------------------------------*/
 # %BANNER_END%
 
+from __future__ import annotations
+
 from pathlib import Path
 import argparse
 import random
+from typing import Dict, Sequence, Tuple, Union
 import numpy as np
 import matplotlib.cm as cm
 import torch
@@ -65,25 +68,25 @@ torch.set_grad_enabled(False)
 
 
 def image_pair_matching(
-    input_images,
-    ref_image,
-    output_dir,
-    resize=[-1],
-    resize_float=False,
-    superglue="indoor",
-    max_keypoints=1024,
-    keypoint_threshold=0.005,
-    nms_radius=4,
-    sinkhorn_iterations=20,
-    match_threshold=0.2,
-    viz=False,
-    fast_viz=False,
-    cache=True,
-    show_keypoints=False,
-    viz_extension="png",
-    save=False,
-    viz_best=True,
-):
+    input_images: Sequence[Union[str, Path]],
+    ref_image: Union[str, Path],
+    output_dir: Union[str, Path],
+    resize: Sequence[int] | None = None,
+    resize_float: bool = False,
+    superglue: str = "indoor",
+    max_keypoints: int = 1024,
+    keypoint_threshold: float = 0.005,
+    nms_radius: int = 4,
+    sinkhorn_iterations: int = 20,
+    match_threshold: float = 0.2,
+    viz: bool = False,
+    fast_viz: bool = False,
+    cache: bool = True,
+    show_keypoints: bool = False,
+    viz_extension: str = "png",
+    save: bool = False,
+    viz_best: bool = True,
+) -> Tuple[int, Dict[str, np.ndarray]]:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print('Running inference on device "{}"'.format(device))
@@ -101,6 +104,7 @@ def image_pair_matching(
     }
     matching = Matching(config).eval().to(device)
 
+    resize_values = list(resize) if resize is not None else [-1]
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
     print('Will write matches to directory "{}"'.format(output_dir))
@@ -135,9 +139,11 @@ def image_pair_matching(
             timer.update("load_cache")
 
         rot0, rot1 = 0, 0
-        image0, inp0, scales0 = read_image(image, device, resize, rot0, resize_float)
+        image0, inp0, scales0 = read_image(
+            image, device, resize_values, rot0, resize_float
+        )
         image1, inp1, scales1 = read_image(
-            ref_image, device, resize, rot1, resize_float
+            ref_image, device, resize_values, rot1, resize_float
         )
         if image0 is None or image1 is None:
             print("Problem reading image pair: {} and ref".format(i))

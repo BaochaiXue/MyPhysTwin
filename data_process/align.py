@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Align the TRELLIS shape prior with observed RGB-D data using feature matching and ARAP.
 
 This script renders the TRELLIS mesh under multiple viewpoints, selects the best match against the
@@ -10,6 +12,8 @@ precomputed correspondences) and a refined mesh ``final_mesh.glb`` suitable for 
 simulation. The code operates in-place on files within the case directory and assumes GPU rendering
 helpers from ``utils.align_util`` are available.
 """
+
+from typing import Any, Dict, Sequence, Tuple
 
 import open3d as o3d  # Provides 3D geometry manipulation and visualisation utilities.
 import numpy as np  # Core numerical library for matrix algebra and vector operations.
@@ -34,7 +38,7 @@ import matplotlib.pyplot as plt  # Used for diagnostic plots of matching results
 from scipy.optimize import minimize  # Optimises the post-PnP scale parameter.
 from scipy.spatial import KDTree  # Accelerates nearest-neighbour lookups on mesh/point sets.
 
-VIS = True  # Global flag controlling whether intermediate visualisations are generated.
+VIS: bool = True  # Global flag controlling whether intermediate visualisations are generated.
 parser = ArgumentParser()
 parser.add_argument(
     "--base_path",
@@ -51,7 +55,7 @@ CONTROLLER_NAME = args.controller_name  # Semantic name of the controller (typic
 output_dir = f"{base_path}/{case_name}/shape/matching"  # Folder storing alignment artefacts and diagnostics.
 
 
-def existDir(dir_path):
+def existDir(dir_path: str) -> None:
     """Create ``dir_path`` if it does not exist so downstream file writes succeed.
 
     Args:
@@ -65,8 +69,13 @@ def existDir(dir_path):
 
 
 def pose_selection_render_superglue(
-    raw_img, fov, mesh_path, mesh, crop_img, output_dir
-):
+    raw_img: np.ndarray,
+    fov: float,
+    mesh_path: str,
+    mesh: trimesh.Trimesh,
+    crop_img: np.ndarray,
+    output_dir: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any], np.ndarray]:
     """Render candidate viewpoints of the mesh and choose the best via SuperGlue matching.
 
     Args:
@@ -114,7 +123,11 @@ def pose_selection_render_superglue(
     return best_color, best_depth, best_pose, match_result, camera_intrinsics  # Return diagnostics for downstream processing.
 
 
-def registration_pnp(mesh_matching_points, raw_matching_points, intrinsic):
+def registration_pnp(
+    mesh_matching_points: np.ndarray,
+    raw_matching_points: np.ndarray,
+    intrinsic: np.ndarray,
+) -> np.ndarray:
     """Solve PnP between mesh keypoints and 2D image correspondences.
 
     Args:
@@ -156,7 +169,9 @@ def registration_pnp(mesh_matching_points, raw_matching_points, intrinsic):
     return mesh2raw_camera  # Provide transform from mesh coordinates into raw camera coordinates.
 
 
-def registration_scale(mesh_matching_points_cam, matching_points_cam):
+def registration_scale(
+    mesh_matching_points_cam: np.ndarray, matching_points_cam: np.ndarray
+) -> float:
     """Optimise a scalar to best align PnP-transformed mesh points to observed 3D points in camera space.
 
     Args:
@@ -184,7 +199,11 @@ def registration_scale(mesh_matching_points_cam, matching_points_cam):
     return optimal_scale  # Return best-fit scale factor.
 
 
-def deform_ARAP(initial_mesh_world, mesh_matching_points_world, matching_points):
+def deform_ARAP(
+    initial_mesh_world: o3d.geometry.TriangleMesh,
+    mesh_matching_points_world: np.ndarray,
+    matching_points: np.ndarray,
+) -> Tuple[o3d.geometry.TriangleMesh, np.ndarray]:
     """Perform ARAP deformation using matched keypoints between mesh and observed points.
 
     Args:
@@ -209,8 +228,13 @@ def deform_ARAP(initial_mesh_world, mesh_matching_points_world, matching_points)
 
 
 def get_matching_ray_registration(
-    mesh_world, obs_points_world, mesh, trimesh_indices, c2w, w2c
-):
+    mesh_world: o3d.geometry.TriangleMesh,
+    obs_points_world: np.ndarray,
+    mesh: trimesh.Trimesh,
+    trimesh_indices: np.ndarray,
+    c2w: np.ndarray,
+    w2c: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
     """Ray-cast mesh visibility and pair visible vertices with closest observation points along camera rays.
 
     Args:
@@ -290,15 +314,15 @@ def get_matching_ray_registration(
 
 
 def deform_ARAP_ray_registration(
-    deform_kp_mesh_world,
-    obs_points_world,
-    mesh,
-    trimesh_indices,
-    c2ws,
-    w2cs,
-    mesh_points_indices,
-    matching_points,
-):
+    deform_kp_mesh_world: o3d.geometry.TriangleMesh,
+    obs_points_world: np.ndarray,
+    mesh: trimesh.Trimesh,
+    trimesh_indices: np.ndarray,
+    c2ws: Sequence[np.ndarray],
+    w2cs: Sequence[np.ndarray],
+    mesh_points_indices: np.ndarray,
+    matching_points: np.ndarray,
+) -> o3d.geometry.TriangleMesh:
     """Augment ARAP constraints with ray-based correspondences across multiple camera viewpoints.
 
     Args:
@@ -352,7 +376,7 @@ def deform_ARAP_ray_registration(
     return final_mesh_world  # Return the final aligned mesh in world coordinates.
 
 
-def line_point_distance(p, points):
+def line_point_distance(p: np.ndarray, points: np.ndarray) -> np.ndarray:
     """Compute perpendicular distances from the ray defined by ``p`` to each observation point.
 
     Args:

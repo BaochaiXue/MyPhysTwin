@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 """Post-process SAM2 masks using 3D consistency checks and radius outlier filtering."""
+
+from typing import Dict, List, Tuple, Union
 
 import numpy as np  # Numerical operations for point filtering and mask updates.
 import open3d as o3d  # Provides radius-based outlier removal and visualisation utilities.
@@ -24,17 +28,18 @@ base_path = args.base_path
 case_name = args.case_name
 CONTROLLER_NAME = args.controller_name
 
-processed_masks = {}
+MaskInfo = Dict[int, Dict[str, Union[int, List[int]]]]
+processed_masks: Dict[int, Dict[int, Dict[str, np.ndarray]]] = {}
 
 
-def exist_dir(dir):
+def exist_dir(dir: str) -> None:
     """Create ``dir`` if missing so subsequent writes succeed."""
 
     if not os.path.exists(dir):
         os.makedirs(dir)
 
 
-def read_mask(mask_path):
+def read_mask(mask_path: str) -> np.ndarray:
     """Load a binary mask and convert it into a boolean numpy array.
 
     Args:
@@ -49,7 +54,13 @@ def read_mask(mask_path):
     return mask
 
 
-def process_pcd_mask(frame_idx, pcd_path, mask_path, mask_info, num_cam):
+def process_pcd_mask(
+    frame_idx: int,
+    pcd_path: str,
+    mask_path: str,
+    mask_info: MaskInfo,
+    num_cam: int,
+) -> Tuple[o3d.geometry.PointCloud, o3d.geometry.PointCloud]:
     """Combine depth-aware filtering and semantic masks to prune noisy detections.
 
     Args:

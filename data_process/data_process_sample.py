@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 """Sample training data from filtered trajectories and optional shape priors."""
+
+from typing import Dict, MutableMapping, Sequence
 
 import numpy as np  # Numerical backbone for point manipulations.
 import open3d as o3d  # Provides point-cloud operations and rendering utilities.
@@ -30,7 +34,11 @@ num_surface_points = args.num_surface_points
 volume_sample_size = args.volume_sample_size
 
 
-def getSphereMesh(center, radius=0.1, color=[0, 0, 0]):
+def getSphereMesh(
+    center: Sequence[float],
+    radius: float = 0.1,
+    color: Sequence[float] = (0, 0, 0),
+) -> o3d.geometry.TriangleMesh:
     """Create an Open3D sphere used to mark controller anchor points in visualisations.
 
     Args:
@@ -47,7 +55,9 @@ def getSphereMesh(center, radius=0.1, color=[0, 0, 0]):
     return sphere
 
 
-def process_unique_points(track_data):
+def process_unique_points(
+    track_data: MutableMapping[str, np.ndarray]
+) -> MutableMapping[str, np.ndarray]:
     """Remove duplicate object tracks, optionally blend in a shape prior, and export diagnostics.
 
     Args:
@@ -176,7 +186,7 @@ def process_unique_points(track_data):
     return track_data
 
 
-def visualize_track(track_data):
+def visualize_track(track_data: Dict[str, np.ndarray]) -> None:
     """Render an animated preview of the filtered object and controller trajectories.
 
     Args:

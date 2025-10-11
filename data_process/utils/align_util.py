@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Tuple, Union
+
 import numpy as np
 import torch
 import trimesh
@@ -15,7 +20,9 @@ from pytorch3d.renderer import (
 from scipy.spatial import cKDTree
 
 
-def select_point(points, raw_matching_points, object_mask):
+def select_point(
+    points: np.ndarray, raw_matching_points: np.ndarray, object_mask: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
     mask_coords = np.column_stack(np.where(object_mask > 0))
     mask_coords = mask_coords[:, ::-1]
     tree = cKDTree(mask_coords)
@@ -28,7 +35,9 @@ def select_point(points, raw_matching_points, object_mask):
     return mask_coords[indices], matched_points
 
 
-def plot_mesh_with_points(mesh, points, filename):
+def plot_mesh_with_points(
+    mesh: trimesh.Trimesh, points: np.ndarray, filename: Union[str, Path]
+) -> None:
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
     ax.plot_trisurf(
@@ -50,7 +59,12 @@ def plot_mesh_with_points(mesh, points, filename):
     plt.clf()
 
 
-def plot_image_with_points(image, points, save_dir, points2=None):
+def plot_image_with_points(
+    image: np.ndarray,
+    points: np.ndarray,
+    save_dir: Union[str, Path],
+    points2: np.ndarray | None = None,
+) -> None:
     plt.imshow(image)
     plt.scatter(points[:, 0], points[:, 1], color="red", s=5)
     if points2 is not None:
@@ -62,7 +76,7 @@ def plot_image_with_points(image, points, save_dir, points2=None):
     plt.clf()
 
 
-def as_mesh(scene_or_mesh):
+def as_mesh(scene_or_mesh: Union[trimesh.Scene, trimesh.Trimesh]) -> trimesh.Trimesh:
     """
     Convert a possible scene to a mesh.
 
@@ -101,7 +115,12 @@ def as_mesh(scene_or_mesh):
     return mesh
 
 
-def project_2d_to_3d(image_points, depth, camera_intrinsics, camera_pose):
+def project_2d_to_3d(
+    image_points: np.ndarray,
+    depth: np.ndarray,
+    camera_intrinsics: np.ndarray,
+    camera_pose: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Project 2D image points to 3D space using the depth map, camera intrinsics, and pose.
 
@@ -129,7 +148,12 @@ def project_2d_to_3d(image_points, depth, camera_intrinsics, camera_pose):
     return world_points_homogeneous[:, :3], valid_mask
 
 
-def sample_camera_poses(radius, num_samples, num_up_samples=4, device="cpu"):
+def sample_camera_poses(
+    radius: float,
+    num_samples: int,
+    num_up_samples: int = 4,
+    device: str = "cpu",
+) -> torch.Tensor:
     """
     Generate camera poses around a sphere with a given radius.
     camera_poses: A list of 4x4 transformation matrices representing the camera poses.
@@ -166,7 +190,14 @@ def sample_camera_poses(radius, num_samples, num_up_samples=4, device="cpu"):
     return torch.tensor(np.array(camera_poses), device=device)
 
 
-def render_image(mesh, camera_poses, width=640, height=480, fov=1, device="cpu"):
+def render_image(
+    mesh: Union[str, Path],
+    camera_poses: np.ndarray,
+    width: int = 640,
+    height: int = 480,
+    fov: float = 1,
+    device: str = "cpu",
+) -> Tuple[np.ndarray, np.ndarray]:
     camera_poses = torch.tensor(camera_poses, device=device)
     if len(camera_poses.shape) == 2:
         camera_poses = camera_poses[None, :]
@@ -226,15 +257,15 @@ def render_image(mesh, camera_poses, width=640, height=480, fov=1, device="cpu")
 
 
 def render_multi_images(
-    mesh,
-    width=640,
-    height=480,
-    fov=1,
-    radius=3.0,
-    num_samples=6,
-    num_ups=2,
-    device="cpu",
-):
+    mesh: Union[str, Path],
+    width: int = 640,
+    height: int = 480,
+    fov: float = 1,
+    radius: float = 3.0,
+    num_samples: int = 6,
+    num_ups: int = 2,
+    device: str = "cpu",
+) -> Tuple[np.ndarray, np.ndarray, torch.Tensor, np.ndarray]:
     # Sample camera poses
     camera_poses = sample_camera_poses(radius, num_samples, num_ups, device)
 

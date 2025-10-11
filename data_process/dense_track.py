@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Track controller and object pixels across time using Meta's Co-Tracker model.
 
 The script samples thousands of pixels inside the union of object and controller masks, feeds the
@@ -34,7 +36,7 @@ assert (
 device = "cuda"  # Co-Tracker inference is performed on the GPU for efficiency.
 
 
-def read_mask(mask_path):
+def read_mask(mask_path: str) -> np.ndarray:
     """Read a mask image and convert it into a boolean array.
 
     Args:
@@ -49,7 +51,7 @@ def read_mask(mask_path):
     return mask
 
 
-def exist_dir(dir):
+def exist_dir(dir: str) -> None:
     """Create ``dir`` if it does not already exist.
 
     Args:

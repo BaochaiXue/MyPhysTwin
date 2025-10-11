@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 """Fuse multi-view RGB-D frames into world-aligned point clouds with basic depth filtering."""
+
+from typing import List, Tuple
 
 import numpy as np  # Fundamental numerical library used for matrix operations and point manipulations.
 import open3d as o3d  # Handles point-cloud/mesh representations and visualisation utilities.
@@ -29,18 +33,18 @@ case_name = args.case_name  # Name of the case to process.
 
 # Use code from https://github.com/Jianghanxiao/Helper3D/blob/master/open3d_RGBD/src/camera/cameraHelper.py
 def getCamera(
-    transformation,
-    fx,
-    fy,
-    cx,
-    cy,
-    scale=1,
-    coordinate=True,
-    shoot=False,
-    length=4,
-    color=np.array([0, 1, 0]),
-    z_flip=False,
-):
+    transformation: np.ndarray,
+    fx: float,
+    fy: float,
+    cx: float,
+    cy: float,
+    scale: float = 1,
+    coordinate: bool = True,
+    shoot: bool = False,
+    length: float = 4,
+    color: np.ndarray = np.array([0, 1, 0]),
+    z_flip: bool = False,
+) -> List[o3d.geometry.Geometry]:
     """Create Open3D primitives that depict a calibrated camera frustum in world coordinates.
 
     Args:
@@ -144,7 +148,7 @@ def getCamera(
     return meshes  # Caller receives all generated geometries.
 
 
-def getPcdFromDepth(depth, intrinsic):
+def getPcdFromDepth(depth: np.ndarray, intrinsic: np.ndarray) -> np.ndarray:
     """Project a depth map into camera-space XYZ coordinates using the provided intrinsics.
 
     Args:
@@ -172,7 +176,13 @@ def getPcdFromDepth(depth, intrinsic):
     return points  # Return XYZ coordinates for every pixel.
 
 
-def get_pcd_from_data(path, frame_idx, num_cam, intrinsics, c2ws):
+def get_pcd_from_data(
+    path: str,
+    frame_idx: int,
+    num_cam: int,
+    intrinsics: np.ndarray,
+    c2ws: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load RGB-D data for a frame across all cameras and transform it into world-aligned point clouds.
 
     Args:
@@ -267,7 +277,7 @@ def get_pcd_from_data(path, frame_idx, num_cam, intrinsics, c2ws):
     )  # Provide the per-camera tensors to the caller.
 
 
-def exist_dir(dir):
+def exist_dir(dir: str) -> None:
     """Create ``dir`` if missing.
 
     Args:
